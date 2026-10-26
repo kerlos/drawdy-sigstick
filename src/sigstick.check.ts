@@ -78,5 +78,10 @@ const css = stylingCss({
 assert.match(css, /color-scheme: dark;/);
 assert.match(css, /--dd-surface-panel:#111;/);
 assert.match(css, /--dd-accent:#00fx;/);
+assert.match(css, /--dd-interaction-hover:rgba\(255,255,255,0\.08\)/);
+const light = stylingCss({ theme: "light", mutedForeground: "#777", border: "#ccc" });
+assert.match(light, /--dd-text-secondary:#777/);
+assert.match(light, /--dd-divider:#ccc/);
+assert.match(light, /--dd-interaction-hover:rgba\(0,0,0,0\.06\)/);
 
 console.log("sigstick check ok");

@@ -71,9 +71,13 @@ main { flex: 1; overflow-y: auto; padding: 4px var(--dd-space-16, 16px) var(--dd
   font: inherit;
   overflow: hidden;
 }
-.pack:hover { background: var(--dd-interaction-hover, rgba(0,0,0,0.04)); }
-.cover, .thumb, .sticker img, .discover-card img.cover {
-  background: #fff;
+.pack:hover, .discover-card:hover {
+  background:
+    linear-gradient(var(--dd-interaction-hover, transparent), var(--dd-interaction-hover, transparent)),
+    var(--dd-surface-elevated, transparent);
+}
+.cover, .thumb, .discover-card img.cover {
+  background: var(--dd-surface-section, transparent);
   object-fit: contain;
 }
 .cover {
@@ -86,10 +90,10 @@ main { flex: 1; overflow-y: auto; padding: 4px var(--dd-space-16, 16px) var(--dd
 .pack-copy { min-width: 0; flex: 1; }
 .pack-title {
   margin: 0;
-  font-size: 14px;
-  line-height: 20px;
-  font-weight: 600;
-  color: var(--dd-accent-text, #2f6fed);
+  font-size: var(--dd-type-label-size, 12px);
+  line-height: var(--dd-type-label-line, 16px);
+  font-weight: var(--dd-type-label-weight, 500);
+  color: var(--dd-text-primary, inherit);
 }
 .pack-author, .meta {
   margin: 0;
@@ -108,12 +112,15 @@ main { flex: 1; overflow-y: auto; padding: 4px var(--dd-space-16, 16px) var(--dd
 .linkish {
   border: 0;
   background: transparent;
-  color: var(--dd-text-secondary, #555);
+  color: var(--dd-text-secondary, inherit);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--dd-type-caption-size, 11px);
+  line-height: var(--dd-type-caption-line, 16px);
   cursor: pointer;
   padding: 2px 0;
 }
+.linkish.is-add { color: var(--dd-accent-text, inherit); }
+.linkish:hover { color: var(--dd-text-primary, inherit); }
 .empty {
   padding: 28px 8px;
   text-align: center;
@@ -145,10 +152,10 @@ main { flex: 1; overflow-y: auto; padding: 4px var(--dd-space-16, 16px) var(--dd
 .modal-head .titles { min-width: 0; flex: 1; }
 #modal-title {
   margin: 0;
-  font-size: 16px;
-  line-height: 22px;
-  font-weight: 600;
-  color: var(--dd-accent-text, #2f6fed);
+  font-size: var(--dd-type-heading-size, 14px);
+  line-height: var(--dd-type-heading-line, 20px);
+  font-weight: var(--dd-type-heading-weight, 600);
+  color: var(--dd-text-primary, inherit);
 }
 .modal-actions { display: flex; gap: 6px; flex: none; }
 button.solid, button.ghost {
@@ -165,12 +172,15 @@ button.solid {
   background: var(--dd-accent, #3b6cff);
   color: var(--dd-on-accent, #fff);
 }
-button.solid:disabled { background: var(--dd-interaction-disabled, #ddd); color: var(--dd-text-disabled, #888); cursor: default; }
+button.solid:hover { background: var(--dd-accent-hover, var(--dd-accent, #3b6cff)); }
+button.solid:active { background: var(--dd-accent-pressed, var(--dd-accent, #3b6cff)); }
 button.ghost {
   border: 1px solid var(--dd-border-medium, #ccc);
   background: transparent;
-  color: var(--dd-text-primary, #111);
+  color: var(--dd-text-primary, inherit);
 }
+button.ghost:hover { background: var(--dd-interaction-hover, transparent); }
+button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
 .modal-scroll { flex: 1; overflow: auto; padding: var(--dd-space-12, 12px) var(--dd-space-16, 16px) var(--dd-space-16, 16px); }
 .sticker-grid {
   display: grid;
@@ -183,7 +193,7 @@ button.ghost {
   padding: 0;
   border: 1px solid var(--dd-divider, #eee);
   border-radius: var(--dd-radius-md, 6px);
-  background: #fff;
+  background: var(--dd-surface-section, transparent);
   cursor: pointer;
   overflow: hidden;
 }
@@ -199,8 +209,10 @@ button.ghost {
 #discover { margin-top: var(--dd-space-16, 16px); }
 #discover h3 {
   margin: 0 0 8px;
-  font-size: var(--dd-type-heading-size, 14px);
-  font-weight: 600;
+  font-size: var(--dd-type-label-size, 12px);
+  line-height: var(--dd-type-label-line, 16px);
+  font-weight: var(--dd-type-label-weight, 500);
+  color: var(--dd-text-secondary, inherit);
 }
 .discover-row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
 .discover-card {
@@ -320,20 +332,19 @@ button.ghost {
     copy.appendChild(title);
     copy.appendChild(author);
     copy.appendChild(thumbs(pack, "thumb"));
-    if (saved) {
-      var actions = document.createElement("div");
-      actions.className = "row-actions";
-      var remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "linkish";
-      remove.textContent = "Remove";
-      remove.addEventListener("click", function (event) {
-        event.stopPropagation();
-        api.postMessage({ type: "forget", id: pack.id });
-      });
-      actions.appendChild(remove);
-      copy.appendChild(actions);
-    }
+    var actions = document.createElement("div");
+    actions.className = "row-actions";
+    var toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = saved ? "linkish" : "linkish is-add";
+    toggle.textContent = saved ? "Remove" : "Add";
+    toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      if (saved) api.postMessage({ type: "forget", id: pack.id });
+      else api.postMessage({ type: "save", pack: pack });
+    });
+    actions.appendChild(toggle);
+    copy.appendChild(actions);
     button.appendChild(copy);
     button.addEventListener("click", function () {
       openModal(pack, saved ? [] : others(pack.id));
@@ -362,7 +373,7 @@ button.ghost {
       }
       var label = document.createElement("div");
       label.className = "section-label";
-      label.textContent = "Saved";
+      label.textContent = "Your list";
       main.appendChild(label);
       for (var i = 0; i < library.length; i++) main.appendChild(packCard(library[i], true));
       return;
@@ -374,7 +385,8 @@ button.ghost {
       main.appendChild(none);
       return;
     }
-    for (var j = 0; j < results.length; j++) main.appendChild(packCard(results[j], false));
+    var ids = savedIds();
+    for (var j = 0; j < results.length; j++) main.appendChild(packCard(results[j], !!ids[results[j].id]));
   }
 
   function paintSave() {
@@ -491,7 +503,7 @@ button.ghost {
     }
     if (raw.type === "library") {
       library = raw.packs || [];
-      if (!search.value.trim()) renderMain();
+      renderMain();
       if (openPack) paintSave();
       return;
     }

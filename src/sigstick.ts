@@ -122,6 +122,20 @@ export function stylingCss(styling: object): string {
         if (typeof value !== "string") continue;
         parts.push(`${token}:${value.replace(/[;{}]/g, "")};`);
     }
+    const muted = record.mutedForeground;
+    if (typeof muted === "string") {
+        parts.push(`--dd-text-secondary:${muted.replace(/[;{}]/g, "")};`);
+    }
+    const border = record.border;
+    if (typeof border === "string") {
+        const clean = border.replace(/[;{}]/g, "");
+        parts.push(`--dd-border-medium:${clean};`, `--dd-divider:${clean};`);
+    }
+    const dark = record.theme === "dark";
+    parts.push(
+        `--dd-interaction-hover:${dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)"};`,
+        `--dd-interaction-pressed:${dark ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.10)"};`,
+    );
     if (record.tokens && typeof record.tokens === "object") parts.push(tokensCss(record.tokens));
     return parts.join("");
 }
