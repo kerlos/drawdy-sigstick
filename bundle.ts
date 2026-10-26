@@ -60,23 +60,7 @@ async function loadOptions(dir: string): Promise<RollupOptions[]> {
                 format: "cjs",
                 exports: "named",
             },
-            plugins: [
-                typescript({ tsconfig: join(dir, "tsconfig.json") }),
-                {
-                    name: "dev-search-proxy",
-                    transform(code, id) {
-                        if (process.env.DRAWDY_DEV_PROXY !== "1") return null;
-                        if (!id.replaceAll("\\", "/").endsWith("/src/sigstick.ts")) {
-                            return null;
-                        }
-                        const next = code.replaceAll(
-                            "https://backend.drawdy.io/api/sigstick/search?keyword=",
-                            "http://localhost:5173/sigstick?keyword="
-                        );
-                        return next === code ? null : next;
-                    },
-                },
-            ],
+            plugins: [typescript({ tsconfig: join(dir, "tsconfig.json") })],
         },
     ];
 }

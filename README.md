@@ -35,7 +35,7 @@ npm run dev
 
 On a **local** board, open the command palette and run **Add extension dev server** with `http://localhost:5173`.
 
-`npm run dev` proxies search at `http://localhost:5173/sigstick` and points the dev bundle there. The published extension calls `https://backend.drawdy.io/api/sigstick/search`. The worker origin is `null`, so that route echoes the request `Origin`.
+Search calls `https://backend.drawdy.io/api/sigstick/search` from the driver, the same way [Klipy](https://github.com/drawdyio/drawdy-official-extension-klipy) calls `/api/klipy`. Drawdy runs that driver in a sandboxed iframe, so the browser sends `Origin: null`. Chrome blocks that origin from reaching `localhost`.
 
 ## Credits
 
