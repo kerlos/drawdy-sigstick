@@ -6,24 +6,13 @@ Install the extension, click the sticker icon, type a search, open a pack, then 
 
 ## How to use
 
-1. **Open the panel.** Click the sticker icon in the extension rail.
-2. **Search.** Type in the box. The extension requests `https://www.sigstick.com/_next/data/Gr1V-1hyleuIsEkfWwJpP/stickers.json?keyword=` plus your text, and keeps at most 100 packs.
-3. **Preview.** Each pack shows its cover, title, and the first six stickers.
-4. **Open a pack.** The list shows every sticker. Click a sticker to put it on the board. **Discover more** is the other packs from that same response.
-5. **Come back later.** **Add** keeps the pack on this device. **Remove** drops it. An empty search shows that list. Clicking a sticker also keeps the pack.
-
-| Interaction | What happens |
-| --- | --- |
-| Click the rail icon | Opens the sticker panel |
-| Type in the search box | Searches SigStick after a short pause |
-| Click a pack | Opens the sticker list |
-| Click a sticker | Places it in the middle of the view and saves the pack |
-| Add / Remove | Puts the open pack on your list, or takes it off |
-| Discover more | Opens another pack from the same search |
-| Empty search | Shows packs saved on this device |
-| Remove | Drops a saved pack from this device |
-
-Saved packs are stored with this extension on this browser, not on the SigStick account.
+1. **Click the sticker icon.** The sticker panel opens.
+2. **Type in Search stickers.** Matching packs show up.
+3. **Click a pack.** Every sticker in that pack is listed.
+4. **Click a sticker.** It goes on the board.
+5. **Click Add or Remove.** Add keeps the pack. Remove drops it.
+6. **Clear the search.** Packs you kept show up.
+7. **Click Discover more.** Another pack from the results opens.
 
 ## Develop
 
