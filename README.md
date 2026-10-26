@@ -35,7 +35,7 @@ npm run dev
 
 On a **local** board, open the command palette and run **Add extension dev server** with `http://localhost:5173`.
 
-Search goes through `https://backend.drawdy.io/api/sigstick/search`. SigStick does not send `Access-Control-Allow-Origin`, and the Drawdy worker origin is `null`.
+`npm run dev` proxies search at `http://localhost:5173/sigstick` and points the dev bundle there. The published extension calls `https://backend.drawdy.io/api/sigstick/search`. The worker origin is `null`, so that route echoes the request `Origin`.
 
 ## Credits
 
