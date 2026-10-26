@@ -3,20 +3,23 @@ import {
     LIBRARY_CAP,
     MAX_RESULTS,
     PREVIEW_COUNT,
-    SEARCH_PREFIX,
+    SEARCH_API,
     asPack,
     packsFromSearch,
     packsFromStorage,
     parseFromWebview,
     previewStickers,
-    searchUrl,
+    searchApiUrl,
     stylingCss,
     upsertPack,
 } from "./sigstick.ts";
 
-const url = searchUrl("  wu wa  ");
-assert.equal(url, SEARCH_PREFIX + encodeURIComponent("wu wa"));
-assert.equal(searchUrl("x".repeat(300)).length, SEARCH_PREFIX.length + encodeURIComponent("x".repeat(200)).length);
+const url = searchApiUrl("  wu wa  ");
+assert.equal(url, SEARCH_API + encodeURIComponent("wu wa"));
+assert.equal(
+    searchApiUrl("x".repeat(300)).length,
+    SEARCH_API.length + encodeURIComponent("x".repeat(200)).length,
+);
 
 const stickers = [0, 1, 2, 3, 4].map((n) => ({
     emoji: null,
@@ -45,6 +48,7 @@ assert.equal(previewStickers(views[0]!).length, PREVIEW_COUNT);
 assert.equal(previewStickers(views[0]!)[3]?.url, "https://cdn.example/p/3.png");
 assert.equal(packsFromSearch({ pageProps: { packs: null } }).length, 0);
 assert.equal(packsFromSearch(null).length, 0);
+assert.equal(packsFromSearch({ packs: [packs[1]] })[0]?.id, "p0");
 
 const saved = upsertPack(
     upsertPack([], views[1]!),

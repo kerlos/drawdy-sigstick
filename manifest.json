@@ -1,7 +1,7 @@
 {
     "driverId": "kerlos.sigstick",
     "driverName": "SigStick",
-    "driverVersion": "0.1.1",
+    "driverVersion": "0.1.2",
     "description": "Search SigStick sticker packs, preview four stickers, and add any sticker to the board. Saved packs stay on this device.",
     "main": "main.js",
     "icon": "icon.svg",

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+Search goes through the Drawdy backend, because SigStick blocks the extension worker.
+
 ## 0.1.1
 
 Panel follows Drawdy light and dark theme tokens. Pack list uses Add and Remove.

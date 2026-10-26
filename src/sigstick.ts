@@ -2,9 +2,9 @@ import type { PackView, SigStickSearchResultResponse } from "./types.ts";
 
 export type { PackView };
 
-/** SigStick Next.js data route. The build id is part of the path they gave us. */
-export const SEARCH_PREFIX =
-    "https://www.sigstick.com/_next/data/Gr1V-1hyleuIsEkfWwJpP/stickers.json?keyword=";
+/** Drawdy backend proxy. SigStick itself sends no Access-Control-Allow-Origin. */
+export const SEARCH_API =
+    "https://backend.drawdy.io/api/sigstick/search?keyword=";
 
 export const MAX_RESULTS = 100;
 export const PREVIEW_COUNT = 4;
@@ -13,8 +13,8 @@ export const LIBRARY_CAP = 100;
 /** ponytail: ignore a pack that claims more stickers than SigStick serves (~20). */
 const MAX_STICKERS = 500;
 
-export function searchUrl(keyword: string): string {
-    return SEARCH_PREFIX + encodeURIComponent(keyword.trim().slice(0, 200));
+export function searchApiUrl(keyword: string): string {
+    return SEARCH_API + encodeURIComponent(keyword.trim().slice(0, 200));
 }
 
 function httpUrl(value: unknown): string | null {
@@ -47,8 +47,12 @@ export function asPack(value: unknown): PackView | null {
 }
 
 export function packsFromSearch(data: unknown): PackView[] {
-    const pageProps = (data as SigStickSearchResultResponse | null)?.pageProps;
-    const packs = pageProps?.packs;
+    if (!data || typeof data !== "object") return [];
+    const record = data as {
+        pageProps?: { packs?: unknown };
+        packs?: unknown;
+    };
+    const packs = record.pageProps?.packs ?? record.packs;
     if (!Array.isArray(packs)) return [];
     const out: PackView[] = [];
     for (const pack of packs) {
@@ -140,30 +144,15 @@ export function stylingCss(styling: object): string {
     return parts.join("");
 }
 
-/**
- * ponytail: SigStick's JSON route sends no Access-Control-Allow-Origin, so a
- * browser worker cannot read a direct fetch. corsproxy.io re-requests that
- * same URL and adds the header. Ceiling: the proxy can 403 or go away; then
- * search fails until SigStick sends CORS or Drawdy adds a fetch command.
- */
 export async function fetchSearch(keyword: string): Promise<unknown> {
-    const url = searchUrl(keyword);
+    let res: Response;
     try {
-        const direct = await fetch(url);
-        if (direct.ok) return await direct.json();
+        res = await fetch(searchApiUrl(keyword));
     } catch {
-        // Cross-origin read blocked, or the network dropped.
+        throw new Error("Could not reach SigStick search.");
     }
-    let proxied: Response;
-    try {
-        proxied = await fetch("https://corsproxy.io/?" + encodeURIComponent(url));
-    } catch {
-        throw new Error("Could not read SigStick search results from this browser.");
-    }
-    if (!proxied.ok) {
-        throw new Error(`Could not read SigStick search results (HTTP ${proxied.status}).`);
-    }
-    return await proxied.json();
+    if (!res.ok) throw new Error(`SigStick search failed (HTTP ${res.status}).`);
+    return await res.json();
 }
 
 export type FromWebview =

@@ -35,7 +35,7 @@ npm run dev
 
 On a **local** board, open the command palette and run **Add extension dev server** with `http://localhost:5173`.
 
-SigStick's JSON route does not send `Access-Control-Allow-Origin`. The driver fetches that URL first. If the browser blocks the read, it retries through `corsproxy.io`, which requests the same URL and adds the header.
+Search goes through `https://backend.drawdy.io/api/sigstick/search`. SigStick does not send `Access-Control-Allow-Origin`, and the Drawdy worker origin is `null`.
 
 ## Credits
 
