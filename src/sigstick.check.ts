@@ -21,7 +21,7 @@ assert.equal(
     SEARCH_API.length + encodeURIComponent("x".repeat(200)).length,
 );
 
-const stickers = [0, 1, 2, 3, 4].map((n) => ({
+const stickers = [0, 1, 2, 3, 4, 5].map((n) => ({
     emoji: null,
     url: `https://cdn.example/p/${n}.png`,
 }));
@@ -45,7 +45,7 @@ assert.equal(views.length, MAX_RESULTS);
 assert.equal(views[0]?.id, "p0");
 assert.equal(views[0]?.coverUrl, "https://cdn.example/p0/cover.png");
 assert.equal(previewStickers(views[0]!).length, PREVIEW_COUNT);
-assert.equal(previewStickers(views[0]!)[3]?.url, "https://cdn.example/p/3.png");
+assert.equal(previewStickers(views[0]!)[5]?.url, "https://cdn.example/p/5.png");
 assert.equal(packsFromSearch({ pageProps: { packs: null } }).length, 0);
 assert.equal(packsFromSearch(null).length, 0);
 assert.equal(packsFromSearch({ packs: [packs[1]] })[0]?.id, "p0");

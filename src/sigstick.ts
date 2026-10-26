@@ -7,7 +7,7 @@ export const SEARCH_API =
     "https://backend.drawdy.io/api/sigstick/search?keyword=";
 
 export const MAX_RESULTS = 100;
-export const PREVIEW_COUNT = 4;
+export const PREVIEW_COUNT = 6;
 /** ponytail: device library stops at 100 packs, newest first. Drop the tail. */
 export const LIBRARY_CAP = 100;
 /** ponytail: ignore a pack that claims more stickers than SigStick serves (~20). */

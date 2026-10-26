@@ -8,7 +8,7 @@ Install the extension, click the sticker icon, type a search, open a pack, then 
 
 1. **Open the panel.** Click the sticker icon in the extension rail.
 2. **Search.** Type in the box. The extension requests `https://www.sigstick.com/_next/data/Gr1V-1hyleuIsEkfWwJpP/stickers.json?keyword=` plus your text, and keeps at most 100 packs.
-3. **Preview.** Each pack shows its cover, title, and the first four stickers.
+3. **Preview.** Each pack shows its cover, title, and the first six stickers.
 4. **Open a pack.** The list shows every sticker. Click a sticker to put it on the board. **Discover more** is the other packs from that same response.
 5. **Come back later.** **Add** keeps the pack on this device. **Remove** drops it. An empty search shows that list. Clicking a sticker also keeps the pack.
 

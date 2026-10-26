@@ -309,7 +309,7 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
   function thumbs(pack, className) {
     var row = document.createElement("div");
     row.className = "thumbs";
-    var n = Math.min(4, pack.stickers.length);
+    var n = Math.min(6, pack.stickers.length);
     for (var i = 0; i < n; i++) {
       row.appendChild(makeImg(pack.stickers[i].url, className, ""));
     }
