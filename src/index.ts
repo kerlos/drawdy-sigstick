@@ -7,6 +7,7 @@ import type {
 import type { DomElementSchema } from "@drawdy/driver-protocol";
 import {
     fetchSearch,
+    fittedSize,
     isAnimatedImage,
     packsFromSearch,
     packsFromStorage,
@@ -78,6 +79,196 @@ async function remember(pack: PackView): Promise<boolean> {
 }
 
 const px = (n: number): [number, "px"] => [n, "px"];
+const PREVIEW_OPACITY = 0.45;
+
+const naturalSize = new Map<string, { width: number; height: number }>();
+
+type Ghost = {
+    previewId: string;
+    elementId: string;
+    url: string;
+    width: number;
+    height: number;
+};
+
+let ghost: Ghost | null = null;
+let ghostUrl: string | null = null;
+let ghostGen = 0;
+let ghostChain: Promise<void> = Promise.resolve();
+let ghostPoint: { x: number; y: number } | null = null;
+let ghostBusy = false;
+
+function pokeGhost(): void {
+    if (ghostBusy) return;
+    ghostBusy = true;
+    ghostChain = ghostChain.then(flushGhost);
+}
+
+function stopGhost(): Promise<void> {
+    ghostGen += 1;
+    ghostUrl = null;
+    ghostPoint = null;
+    pokeGhost();
+    return ghostChain;
+}
+
+function startGhost(url: string, x: number, y: number): void {
+    if (ghostUrl !== url) ghostGen += 1;
+    ghostUrl = url;
+    ghostPoint = { x, y };
+    pokeGhost();
+}
+
+function moveGhost(x: number, y: number): void {
+    if (!ghostUrl) return;
+    ghostPoint = { x, y };
+    pokeGhost();
+}
+
+async function flushGhost(): Promise<void> {
+    ghostBusy = false;
+    const gen = ghostGen;
+    const url = ghostUrl;
+    const point = ghostPoint;
+    ghostPoint = null;
+    if (!url || !point || gen !== ghostGen) {
+        if (gen === ghostGen) await deleteGhost(gen);
+    } else {
+        await renderGhost(gen, url, point.x, point.y);
+    }
+    if (ghostPoint || ghostGen !== gen) pokeGhost();
+}
+
+async function deleteGhost(gen: number): Promise<void> {
+    if (gen !== ghostGen || !driver) return;
+    const current = ghost;
+    ghost = null;
+    if (!current) return;
+    await driver.issueCommand({
+        type: "command:scene:delete-drawdy-preview-elements",
+        driverId: driver.manifest.driverId,
+        requestId: nextRequestId(),
+        req: { previewIds: [current.previewId] },
+    });
+}
+
+async function discardPreview(previewId: string): Promise<void> {
+    if (!driver) return;
+    await driver.issueCommand({
+        type: "command:scene:delete-drawdy-preview-elements",
+        driverId: driver.manifest.driverId,
+        requestId: nextRequestId(),
+        req: { previewIds: [previewId] },
+    });
+}
+
+function ghostImage(elementId: string, url: string, x: number, y: number, width: number, height: number) {
+    // Preview elements cannot be scene images. A component image is allowed, and opacity fades it.
+    return {
+        type: "component" as const,
+        drawdyElementId: elementId,
+        x,
+        y,
+        width,
+        height,
+        opacity: PREVIEW_OPACITY,
+        schema: animatedSchema(url, width, height),
+    };
+}
+
+/** Pointer in the sticker panel's viewport. `"panel"` means the drop would land back on the panel. */
+async function cursorOnCanvas(
+    drop: { x: number; y: number },
+): Promise<{ x: number; y: number } | "panel" | null> {
+    if (!driver) return null;
+    const current = driver;
+    const frame = await current.issueCommand({
+        type: "command:dom:element-rect",
+        driverId: current.manifest.driverId,
+        requestId: nextRequestId(),
+        req: { elementId: current.webviewId },
+    });
+    if (!driver || frame.res.error !== undefined) return null;
+    const panel = frame.res.value;
+    const backOnPanel =
+        drop.x >= 0 && drop.y >= 0 && drop.x <= panel.width && drop.y <= panel.height;
+    if (backOnPanel) return "panel";
+    const canvas = await current.issueCommand({
+        type: "command:camera:screen-to-canvas",
+        driverId: current.manifest.driverId,
+        requestId: nextRequestId(),
+        req: { x: panel.x + drop.x, y: panel.y + drop.y },
+    });
+    if (!driver || canvas.res.error !== undefined) return null;
+    return canvas.res.value;
+}
+
+async function naturalOf(url: string): Promise<{ width: number; height: number }> {
+    const known = naturalSize.get(url);
+    if (known) return known;
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const bitmap = await createImageBitmap(await res.blob());
+        const size = { width: bitmap.width, height: bitmap.height };
+        bitmap.close();
+        naturalSize.set(url, size);
+        return size;
+    } catch {
+        const size = { width: 1, height: 1 };
+        naturalSize.set(url, size);
+        return size;
+    }
+}
+
+async function renderGhost(gen: number, url: string, x: number, y: number): Promise<void> {
+    if (!driver || gen !== ghostGen) return;
+    const current = driver;
+    const located = await cursorOnCanvas({ x, y });
+    if (!driver || gen !== ghostGen) return;
+    if (!located || located === "panel") {
+        await deleteGhost(gen);
+        return;
+    }
+    const info = await current.issueCommand({
+        type: "command:camera:get-info",
+        driverId: current.manifest.driverId,
+        requestId: nextRequestId(),
+    });
+    if (!driver || gen !== ghostGen || info.res.error !== undefined) return;
+    const natural = await naturalOf(url);
+    if (!driver || gen !== ghostGen) return;
+    const box = fittedSize(natural.width, natural.height, STICKER_SCREEN_PX / (info.res.value.zoom || 1));
+    const left = located.x - box.width / 2;
+    const top = located.y - box.height / 2;
+    if (ghost?.url === url) {
+        ghost.width = box.width;
+        ghost.height = box.height;
+        await current.issueCommand({
+            type: "command:scene:update-drawdy-preview-elements",
+            driverId: current.manifest.driverId,
+            requestId: nextRequestId(),
+            req: { elements: [ghostImage(ghost.elementId, url, left, top, box.width, box.height)] },
+        });
+        return;
+    }
+    if (ghost) await deleteGhost(gen);
+    if (!driver || gen !== ghostGen) return;
+    const elementId = current.generateId();
+    const created = await current.issueCommand({
+        type: "command:scene:create-drawdy-preview-elements",
+        driverId: current.manifest.driverId,
+        requestId: nextRequestId(),
+        req: { elements: [ghostImage(elementId, url, left, top, box.width, box.height)] },
+    });
+    if (!driver || created.res.error !== undefined || !created.res.value) return;
+    const previewId = created.res.value.previewId;
+    if (gen !== ghostGen) {
+        await discardPreview(previewId);
+        return;
+    }
+    ghost = { previewId, elementId, url, width: box.width, height: box.height };
+}
 
 /** DOM image, same path Drawdy uses for a pasted GIF, so the browser keeps the frames. */
 function animatedSchema(url: string, width: number, height: number): DomElementSchema {
@@ -123,9 +314,10 @@ async function placeSticker(url: string, drop?: { x: number; y: number }): Promi
     let height = maxEdge;
     try {
         const bitmap = await createImageBitmap(blob);
-        const scale = maxEdge / Math.max(bitmap.width, bitmap.height, 1);
-        width = Math.max(8, bitmap.width * scale);
-        height = Math.max(8, bitmap.height * scale);
+        naturalSize.set(url, { width: bitmap.width, height: bitmap.height });
+        const fitted = fittedSize(bitmap.width, bitmap.height, maxEdge);
+        width = fitted.width;
+        height = fitted.height;
         bitmap.close();
     } catch {
         // Square fallback when the bytes are not a bitmap this worker can decode.
@@ -134,26 +326,10 @@ async function placeSticker(url: string, drop?: { x: number; y: number }): Promi
     let x: number;
     let y: number;
     if (drop) {
-        const frame = await current.issueCommand({
-            type: "command:dom:element-rect",
-            driverId: current.manifest.driverId,
-            requestId: nextRequestId(),
-            req: { elementId: current.webviewId },
-        });
-        if (!driver || frame.res.error !== undefined) return;
-        const panel = frame.res.value;
-        const backOnPanel =
-            drop.x >= 0 && drop.y >= 0 && drop.x <= panel.width && drop.y <= panel.height;
-        if (backOnPanel) return;
-        const canvas = await current.issueCommand({
-            type: "command:camera:screen-to-canvas",
-            driverId: current.manifest.driverId,
-            requestId: nextRequestId(),
-            req: { x: panel.x + drop.x, y: panel.y + drop.y },
-        });
-        if (!driver || canvas.res.error !== undefined) return;
-        x = canvas.res.value.x - width / 2;
-        y = canvas.res.value.y - height / 2;
+        const located = await cursorOnCanvas(drop);
+        if (!located || located === "panel") return;
+        x = located.x - width / 2;
+        y = located.y - height / 2;
     } else {
         const view = await current.issueCommand({
             type: "command:camera:get-viewport-rect",
@@ -236,12 +412,22 @@ async function handleWebviewMessage(message: FromWebview): Promise<void> {
             }
             return;
         }
+        case "preview":
+            startGhost(message.url, message.x, message.y);
+            return;
+        case "preview-move":
+            moveGhost(message.x, message.y);
+            return;
+        case "preview-end":
+            await stopGhost();
+            return;
         case "add": {
             const drop =
                 message.x === undefined || message.y === undefined
                     ? undefined
                     : { x: message.x, y: message.y };
             await placeSticker(message.url, drop);
+            await stopGhost();
             await remember(message.pack);
             return;
         }

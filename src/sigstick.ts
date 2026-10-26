@@ -201,12 +201,41 @@ export function isAnimatedImage(bytes: Uint8Array): boolean {
     return false;
 }
 
+/** Fit a sticker inside a square of `maxEdge` canvas units, keeping its aspect ratio. */
+export function fittedSize(
+    width: number,
+    height: number,
+    maxEdge: number,
+): { width: number; height: number } {
+    const scale = maxEdge / Math.max(width, height, 1);
+    return {
+        width: Math.max(8, width * scale),
+        height: Math.max(8, height * scale),
+    };
+}
+
 export type FromWebview =
     | { type: "ready" }
     | { type: "search"; requestId: number; keyword: string }
     | { type: "add"; url: string; pack: PackView; x?: number; y?: number }
+    | { type: "preview"; url: string; pack: PackView; x: number; y: number }
+    | { type: "preview-move"; x: number; y: number }
+    | { type: "preview-end" }
     | { type: "save"; pack: PackView }
     | { type: "forget"; id: string };
+
+function finitePoint(x: unknown, y: unknown): { x: number; y: number } | null {
+    if (typeof x !== "number" || typeof y !== "number") return null;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y };
+}
+
+function ownedSticker(body: Record<string, unknown>): { url: string; pack: PackView } | null {
+    const pack = asPack(body.pack);
+    const url = httpUrl(body.url);
+    if (!pack || !url || !pack.stickers.some((sticker) => sticker.url === url)) return null;
+    return { url, pack };
+}
 
 export function parseFromWebview(message: unknown): FromWebview | null {
     if (!message || typeof message !== "object") return null;
@@ -230,17 +259,23 @@ export function parseFromWebview(message: unknown): FromWebview | null {
         return typeof body.id === "string" && body.id ? { type: "forget", id: body.id } : null;
     }
     if (body.type === "add") {
-        const pack = asPack(body.pack);
-        const url = httpUrl(body.url);
-        if (!pack || !url || !pack.stickers.some((sticker) => sticker.url === url)) {
-            return null;
-        }
+        const sticker = ownedSticker(body);
+        if (!sticker) return null;
         const hasX = body.x !== undefined;
         const hasY = body.y !== undefined;
-        if (!hasX && !hasY) return { type: "add", url, pack };
-        if (typeof body.x !== "number" || typeof body.y !== "number") return null;
-        if (!Number.isFinite(body.x) || !Number.isFinite(body.y)) return null;
-        return { type: "add", url, pack, x: body.x, y: body.y };
+        if (!hasX && !hasY) return { type: "add", ...sticker };
+        const point = finitePoint(body.x, body.y);
+        return point ? { type: "add", ...sticker, ...point } : null;
     }
+    if (body.type === "preview") {
+        const sticker = ownedSticker(body);
+        const point = finitePoint(body.x, body.y);
+        return sticker && point ? { type: "preview", ...sticker, ...point } : null;
+    }
+    if (body.type === "preview-move") {
+        const point = finitePoint(body.x, body.y);
+        return point ? { type: "preview-move", ...point } : null;
+    }
+    if (body.type === "preview-end") return { type: "preview-end" };
     return null;
 }

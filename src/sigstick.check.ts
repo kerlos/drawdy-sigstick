@@ -5,6 +5,7 @@ import {
     PREVIEW_COUNT,
     SEARCH_API,
     asPack,
+    fittedSize,
     isAnimatedImage,
     packsFromSearch,
     packsFromStorage,
@@ -87,6 +88,29 @@ assert.equal(
     parseFromWebview({ type: "add", url: views[0]!.stickers[0]!.url, pack: views[0], x: 1 }),
     null,
 );
+assert.deepEqual(fittedSize(200, 100, 180), { width: 180, height: 90 });
+assert.deepEqual(fittedSize(1, 1, 180), { width: 180, height: 180 });
+assert.deepEqual(
+    parseFromWebview({
+        type: "preview",
+        url: views[0]!.stickers[0]!.url,
+        pack: views[0],
+        x: 12,
+        y: 40,
+    }),
+    { type: "preview", url: views[0]!.stickers[0]!.url, pack: views[0], x: 12, y: 40 },
+);
+assert.equal(
+    parseFromWebview({ type: "preview", url: "https://evil.example/x.png", pack: views[0], x: 1, y: 2 }),
+    null,
+);
+assert.deepEqual(parseFromWebview({ type: "preview-move", x: 3, y: 4 }), {
+    type: "preview-move",
+    x: 3,
+    y: 4,
+});
+assert.equal(parseFromWebview({ type: "preview-move", x: 1 }), null);
+assert.deepEqual(parseFromWebview({ type: "preview-end" }), { type: "preview-end" });
 assert.equal(
     parseFromWebview({
         type: "add",

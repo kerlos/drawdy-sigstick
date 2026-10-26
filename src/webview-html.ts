@@ -405,31 +405,57 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
   function bindPlace(cell, url) {
     var startX = 0;
     var startY = 0;
+    var hoverX = 0;
+    var hoverY = 0;
     var pressing = false;
     var dragging = false;
     var fromPointer = false;
+    var previewSent = false;
+    var previewFrame = 0;
+
+    function queuePreview(x, y) {
+      hoverX = x;
+      hoverY = y;
+      if (previewFrame) return;
+      previewFrame = requestAnimationFrame(function () {
+        previewFrame = 0;
+        if (!pressing || !dragging) return;
+        if (!previewSent) {
+          previewSent = true;
+          api.postMessage({ type: "preview", url: url, pack: openPack, x: hoverX, y: hoverY });
+        } else {
+          api.postMessage({ type: "preview-move", x: hoverX, y: hoverY });
+        }
+      });
+    }
 
     cell.addEventListener("pointerdown", function (e) {
       if (e.button !== 0) return;
       pressing = true;
       dragging = false;
+      previewSent = false;
       startX = e.clientX;
       startY = e.clientY;
       cell.setPointerCapture(e.pointerId);
     });
 
     cell.addEventListener("pointermove", function (e) {
-      if (!pressing || dragging) return;
-      var dx = e.clientX - startX;
-      var dy = e.clientY - startY;
-      if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
-      dragging = true;
-      cell.classList.add("dragging");
+      if (!pressing) return;
+      if (!dragging) {
+        var dx = e.clientX - startX;
+        var dy = e.clientY - startY;
+        if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
+        dragging = true;
+        cell.classList.add("dragging");
+      }
+      queuePreview(e.clientX, e.clientY);
     });
 
     function release(e) {
       if (cell.hasPointerCapture(e.pointerId)) cell.releasePointerCapture(e.pointerId);
       cell.classList.remove("dragging");
+      if (previewFrame) cancelAnimationFrame(previewFrame);
+      previewFrame = 0;
     }
 
     cell.addEventListener("pointerup", function (e) {
@@ -437,6 +463,7 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       if (!pressing) return;
       pressing = false;
       fromPointer = true;
+      previewSent = false;
       if (dragging) {
         api.postMessage({ type: "add", url: url, pack: openPack, x: e.clientX, y: e.clientY });
       } else {
@@ -448,6 +475,8 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       release(e);
       pressing = false;
       dragging = false;
+      if (previewSent) api.postMessage({ type: "preview-end" });
+      previewSent = false;
     });
 
     cell.addEventListener("click", function (e) {
