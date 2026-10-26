@@ -1,0 +1,24 @@
+{
+    "name": "drawdy-sigstick",
+    "version": "0.1.0",
+    "description": "Drawdy extension that searches SigStick sticker packs and adds them to the board.",
+    "license": "UNLICENSED",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "node build.ts",
+        "typecheck": "tsc --noEmit",
+        "check": "node src/sigstick.check.ts"
+    },
+    "devDependencies": {
+        "@types/node": "^20",
+        "typescript": "^5",
+        "vite": "^8.2.1",
+        "@drawdy/driver-protocol": "latest",
+        "@rollup/plugin-typescript": "^12.1.2",
+        "fflate": "^0.8.2",
+        "rollup": "^4.34.0",
+        "tslib": "^2.8.1"
+    }
+}

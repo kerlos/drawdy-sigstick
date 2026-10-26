@@ -1,0 +1,9 @@
+{
+    "driverId": "kerlos.sigstick",
+    "driverName": "SigStick",
+    "driverVersion": "0.1.0",
+    "description": "Search SigStick sticker packs, preview four stickers, and add any sticker to the board. Saved packs stay on this device.",
+    "main": "main.js",
+    "icon": "icon.svg",
+    "permissions": ["dom", "scene", "storage"]
+}
