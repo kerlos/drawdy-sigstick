@@ -4,8 +4,10 @@ import type {
     DriverModule,
     ModuleStyling,
 } from "@drawdy/driver-protocol";
+import type { DomElementSchema } from "@drawdy/driver-protocol";
 import {
     fetchSearch,
+    isAnimatedImage,
     packsFromSearch,
     packsFromStorage,
     parseFromWebview,
@@ -75,31 +77,45 @@ async function remember(pack: PackView): Promise<boolean> {
     return ok;
 }
 
-async function placeSticker(url: string): Promise<void> {
+const px = (n: number): [number, "px"] => [n, "px"];
+
+/** DOM image, same path Drawdy uses for a pasted GIF, so the browser keeps the frames. */
+function animatedSchema(url: string, width: number, height: number): DomElementSchema {
+    return {
+        type: "box",
+        styles: { width: px(width), height: px(height), overflow: "hidden" },
+        children: [
+            {
+                type: "image",
+                child: url,
+                styles: { width: px(width), height: px(height) },
+            },
+        ],
+    };
+}
+
+async function placeSticker(url: string, drop?: { x: number; y: number }): Promise<void> {
     if (!driver) return;
     const current = driver;
 
     let blob: Blob;
+    let animated = false;
     try {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         blob = await res.blob();
+        animated = isAnimatedImage(new Uint8Array(await blob.arrayBuffer()));
     } catch {
         post({ type: "status", message: "Could not download that sticker." });
         return;
     }
 
-    const view = await current.issueCommand({
-        type: "command:camera:get-viewport-rect",
-        driverId: current.manifest.driverId,
-        requestId: nextRequestId(),
-    });
     const info = await current.issueCommand({
         type: "command:camera:get-info",
         driverId: current.manifest.driverId,
         requestId: nextRequestId(),
     });
-    if (!driver || view.res.error !== undefined || info.res.error !== undefined) return;
+    if (!driver || info.res.error !== undefined) return;
 
     const zoom = info.res.value.zoom || 1;
     const maxEdge = STICKER_SCREEN_PX / zoom;
@@ -115,27 +131,71 @@ async function placeSticker(url: string): Promise<void> {
         // Square fallback when the bytes are not a bitmap this worker can decode.
     }
 
-    const { rect } = view.res.value;
-    const slot = current.placed++;
-    const step = 24 / zoom;
-    const dx = (slot % 4) * step;
-    const dy = Math.floor(slot / 4) % 4 * step;
+    let x: number;
+    let y: number;
+    if (drop) {
+        const frame = await current.issueCommand({
+            type: "command:dom:element-rect",
+            driverId: current.manifest.driverId,
+            requestId: nextRequestId(),
+            req: { elementId: current.webviewId },
+        });
+        if (!driver || frame.res.error !== undefined) return;
+        const panel = frame.res.value;
+        const backOnPanel =
+            drop.x >= 0 && drop.y >= 0 && drop.x <= panel.width && drop.y <= panel.height;
+        if (backOnPanel) return;
+        const canvas = await current.issueCommand({
+            type: "command:camera:screen-to-canvas",
+            driverId: current.manifest.driverId,
+            requestId: nextRequestId(),
+            req: { x: panel.x + drop.x, y: panel.y + drop.y },
+        });
+        if (!driver || canvas.res.error !== undefined) return;
+        x = canvas.res.value.x - width / 2;
+        y = canvas.res.value.y - height / 2;
+    } else {
+        const view = await current.issueCommand({
+            type: "command:camera:get-viewport-rect",
+            driverId: current.manifest.driverId,
+            requestId: nextRequestId(),
+        });
+        if (!driver || view.res.error !== undefined) return;
+        const { rect } = view.res.value;
+        const slot = current.placed++;
+        const step = 24 / zoom;
+        const dx = (slot % 4) * step;
+        const dy = (Math.floor(slot / 4) % 4) * step;
+        x = rect.x + rect.width / 2 - width / 2 + dx;
+        y = rect.y + rect.height / 2 - height / 2 + dy;
+    }
 
+    const id = current.generateId();
     const added = await current.issueCommand({
         type: "command:scene:add-drawdy-elements",
         driverId: current.manifest.driverId,
         requestId: nextRequestId(),
         req: {
             elements: [
-                {
-                    type: "image",
-                    drawdyElementId: current.generateId(),
-                    x: rect.x + rect.width / 2 - width / 2 + dx,
-                    y: rect.y + rect.height / 2 - height / 2 + dy,
-                    width,
-                    height,
-                    blob,
-                },
+                animated
+                    ? {
+                          type: "component",
+                          drawdyElementId: id,
+                          x,
+                          y,
+                          width,
+                          height,
+                          schema: animatedSchema(url, width, height),
+                      }
+                    : {
+                          type: "image",
+                          drawdyElementId: id,
+                          x,
+                          y,
+                          width,
+                          height,
+                          blob,
+                      },
             ],
         },
     });
@@ -177,7 +237,11 @@ async function handleWebviewMessage(message: FromWebview): Promise<void> {
             return;
         }
         case "add": {
-            await placeSticker(message.url);
+            const drop =
+                message.x === undefined || message.y === undefined
+                    ? undefined
+                    : { x: message.x, y: message.y };
+            await placeSticker(message.url, drop);
             await remember(message.pack);
             return;
         }

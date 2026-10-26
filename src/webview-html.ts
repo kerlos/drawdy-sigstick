@@ -194,9 +194,12 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
   border: 1px solid var(--dd-divider, #eee);
   border-radius: var(--dd-radius-md, 6px);
   background: var(--dd-surface-section, transparent);
-  cursor: pointer;
+  cursor: grab;
   overflow: hidden;
+  touch-action: none;
+  user-select: none;
 }
+.cell.dragging { opacity: 0.45; cursor: grabbing; }
 .cell img {
   display: block;
   width: 100%;
@@ -397,6 +400,66 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
     button.disabled = false;
   }
 
+  var DRAG_THRESHOLD = 5;
+
+  function bindPlace(cell, url) {
+    var startX = 0;
+    var startY = 0;
+    var pressing = false;
+    var dragging = false;
+    var fromPointer = false;
+
+    cell.addEventListener("pointerdown", function (e) {
+      if (e.button !== 0) return;
+      pressing = true;
+      dragging = false;
+      startX = e.clientX;
+      startY = e.clientY;
+      cell.setPointerCapture(e.pointerId);
+    });
+
+    cell.addEventListener("pointermove", function (e) {
+      if (!pressing || dragging) return;
+      var dx = e.clientX - startX;
+      var dy = e.clientY - startY;
+      if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
+      dragging = true;
+      cell.classList.add("dragging");
+    });
+
+    function release(e) {
+      if (cell.hasPointerCapture(e.pointerId)) cell.releasePointerCapture(e.pointerId);
+      cell.classList.remove("dragging");
+    }
+
+    cell.addEventListener("pointerup", function (e) {
+      release(e);
+      if (!pressing) return;
+      pressing = false;
+      fromPointer = true;
+      if (dragging) {
+        api.postMessage({ type: "add", url: url, pack: openPack, x: e.clientX, y: e.clientY });
+      } else {
+        api.postMessage({ type: "add", url: url, pack: openPack });
+      }
+    });
+
+    cell.addEventListener("pointercancel", function (e) {
+      release(e);
+      pressing = false;
+      dragging = false;
+    });
+
+    cell.addEventListener("click", function (e) {
+      if (fromPointer) {
+        fromPointer = false;
+        e.preventDefault();
+        return;
+      }
+      api.postMessage({ type: "add", url: url, pack: openPack });
+    });
+  }
+
   function renderModal() {
     if (!openPack) return;
     document.getElementById("modal-cover").src = openPack.coverUrl;
@@ -413,12 +476,9 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       cell.type = "button";
       cell.className = "cell";
       cell.setAttribute("aria-label", openPack.title);
+      cell.title = "Drag onto the board, or click to place in the center";
       cell.appendChild(makeImg(sticker.url, "", openPack.title));
-      cell.addEventListener("click", function (url) {
-        return function () {
-          api.postMessage({ type: "add", url: url, pack: openPack });
-        };
-      }(sticker.url));
+      bindPlace(cell, sticker.url);
       grid.appendChild(cell);
     }
     var discover = document.getElementById("discover");

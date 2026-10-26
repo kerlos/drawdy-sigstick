@@ -1,6 +1,6 @@
 {
     "name": "drawdy-sigstick",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "Drawdy extension that searches SigStick sticker packs and adds them to the board.",
     "license": "UNLICENSED",
     "private": true,

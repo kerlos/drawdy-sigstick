@@ -155,10 +155,56 @@ export async function fetchSearch(keyword: string): Promise<unknown> {
     return await res.json();
 }
 
+const FOUR = (bytes: Uint8Array, at: number) =>
+    String.fromCharCode(bytes[at]!, bytes[at + 1]!, bytes[at + 2]!, bytes[at + 3]!);
+
+const u32be = (bytes: Uint8Array, at: number) =>
+    ((bytes[at]! << 24) | (bytes[at + 1]! << 16) | (bytes[at + 2]! << 8) | bytes[at + 3]!) >>> 0;
+
+const u32le = (bytes: Uint8Array, at: number) =>
+    (bytes[at]! | (bytes[at + 1]! << 8) | (bytes[at + 2]! << 16) | (bytes[at + 3]! << 24)) >>> 0;
+
+/**
+ * SigStick names animated stickers `.png` or `.webp` and often serves
+ * `application/octet-stream`. Canvas image elements paint one frame, so the
+ * board has to tell GIF, APNG, and animated WebP apart from the bytes.
+ *
+ * ponytail: at most 64 container chunks. ANIM and acTL sit in front of the
+ * frame data; a sticker that hides them later needs a full walk.
+ */
+export function isAnimatedImage(bytes: Uint8Array): boolean {
+    if (bytes.length >= 6 && FOUR(bytes, 0) === "GIF8") return true;
+    if (bytes.length >= 8 && bytes[0] === 0x89 && FOUR(bytes, 1) === "PNG\r") {
+        let at = 8;
+        for (let n = 0; n < 64 && at + 8 <= bytes.length; n++) {
+            const size = u32be(bytes, at);
+            const id = FOUR(bytes, at + 4);
+            if (id === "acTL") return true;
+            if (id === "IDAT" || id === "IEND") return false;
+            if (size > bytes.length - at - 12) return false;
+            at += 12 + size;
+        }
+        return false;
+    }
+    if (bytes.length >= 12 && FOUR(bytes, 0) === "RIFF" && FOUR(bytes, 8) === "WEBP") {
+        let at = 12;
+        for (let n = 0; n < 64 && at + 8 <= bytes.length; n++) {
+            const id = FOUR(bytes, at);
+            const size = u32le(bytes, at + 4);
+            if (id === "ANIM" || id === "ANMF") return true;
+            // VP8X flag bit 1 is the animation bit (libwebp ANIMATION_FLAG).
+            if (id === "VP8X" && at + 8 < bytes.length && (bytes[at + 8]! & 0x02) !== 0) return true;
+            if (size > bytes.length - at - 8) return false;
+            at += 8 + size + (size & 1);
+        }
+    }
+    return false;
+}
+
 export type FromWebview =
     | { type: "ready" }
     | { type: "search"; requestId: number; keyword: string }
-    | { type: "add"; url: string; pack: PackView }
+    | { type: "add"; url: string; pack: PackView; x?: number; y?: number }
     | { type: "save"; pack: PackView }
     | { type: "forget"; id: string };
 
@@ -189,7 +235,12 @@ export function parseFromWebview(message: unknown): FromWebview | null {
         if (!pack || !url || !pack.stickers.some((sticker) => sticker.url === url)) {
             return null;
         }
-        return { type: "add", url, pack };
+        const hasX = body.x !== undefined;
+        const hasY = body.y !== undefined;
+        if (!hasX && !hasY) return { type: "add", url, pack };
+        if (typeof body.x !== "number" || typeof body.y !== "number") return null;
+        if (!Number.isFinite(body.x) || !Number.isFinite(body.y)) return null;
+        return { type: "add", url, pack, x: body.x, y: body.y };
     }
     return null;
 }

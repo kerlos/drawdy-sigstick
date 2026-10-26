@@ -5,6 +5,7 @@ import {
     PREVIEW_COUNT,
     SEARCH_API,
     asPack,
+    isAnimatedImage,
     packsFromSearch,
     packsFromStorage,
     parseFromWebview,
@@ -72,6 +73,55 @@ assert.equal(
     parseFromWebview({ type: "add", url: views[0]!.stickers[0]!.url, pack: views[0] })?.type,
     "add",
 );
+assert.deepEqual(
+    parseFromWebview({
+        type: "add",
+        url: views[0]!.stickers[0]!.url,
+        pack: views[0],
+        x: -12,
+        y: 40,
+    }),
+    { type: "add", url: views[0]!.stickers[0]!.url, pack: views[0], x: -12, y: 40 },
+);
+assert.equal(
+    parseFromWebview({ type: "add", url: views[0]!.stickers[0]!.url, pack: views[0], x: 1 }),
+    null,
+);
+assert.equal(
+    parseFromWebview({
+        type: "add",
+        url: views[0]!.stickers[0]!.url,
+        pack: views[0],
+        x: Number.NaN,
+        y: 1,
+    }),
+    null,
+);
+
+const ascii = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
+const png = (id: string) => {
+    const bytes = new Uint8Array(8 + 12);
+    bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    bytes.set(ascii(id), 12);
+    return bytes;
+};
+const webp = (flags: number, extra = "") => {
+    const head = ascii("RIFF\0\0\0\0WEBPVP8X");
+    const tail = ascii(extra);
+    const bytes = new Uint8Array(30 + tail.length);
+    bytes.set(head);
+    bytes[16] = 10;
+    bytes[20] = flags;
+    bytes.set(tail, 30);
+    return bytes;
+};
+assert.equal(isAnimatedImage(ascii("GIF89a")), true);
+assert.equal(isAnimatedImage(png("IHDR")), false);
+assert.equal(isAnimatedImage(png("acTL")), true);
+assert.equal(isAnimatedImage(webp(0x10)), false);
+assert.equal(isAnimatedImage(webp(0x02)), true);
+assert.equal(isAnimatedImage(webp(0x00, "ANIM\0\0\0\0")), true);
+assert.equal(isAnimatedImage(ascii("not-an-image")), false);
 assert.equal(parseFromWebview({ type: "search", requestId: "1", keyword: "cat" }), null);
 
 const css = stylingCss({
