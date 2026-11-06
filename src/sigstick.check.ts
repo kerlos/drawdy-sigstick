@@ -6,7 +6,11 @@ import {
     SEARCH_API,
     asPack,
     fittedSize,
+    imageMime,
     isAnimatedImage,
+    stickerBytes,
+    packApiUrl,
+    packFromDetail,
     packsFromSearch,
     packsFromStorage,
     parseFromWebview,
@@ -51,6 +55,33 @@ assert.equal(previewStickers(views[0]!)[5]?.url, "https://cdn.example/p/5.png");
 assert.equal(packsFromSearch({ pageProps: { packs: null } }).length, 0);
 assert.equal(packsFromSearch(null).length, 0);
 assert.equal(packsFromSearch({ packs: [packs[1]] })[0]?.id, "p0");
+assert.equal(packsFromSearch({ data: { packs: [packs[1]] } })[0]?.id, "p0");
+assert.equal(packsFromSearch({ status: "ok", data: [packs[1]] })[0]?.id, "p0");
+assert.equal(
+    packApiUrl("ejCaa2dm9k7rvk6p5qaC"),
+    "https://api.sigstick.com/v1/stickerPack/ejCaa2dm9k7rvk6p5qaC",
+);
+assert.equal(
+    packFromDetail({
+        status: "ok",
+        data: {
+            id: "ej",
+            title: "wuwa",
+            author: "waaa",
+            cover: { url: "https://cdn.example/c.png" },
+            stickers: [{ url: "https://cdn.example/0.png" }],
+        },
+    })?.stickers[0]?.url,
+    "https://cdn.example/0.png",
+);
+assert.equal(packFromDetail({ pageProps: { pack: packs[1] } })?.id, "p0");
+assert.equal(packFromDetail({ pack: packs[1] })?.id, "p0");
+assert.equal(packFromDetail({ status: "error" }), null);
+assert.deepEqual(parseFromWebview({ type: "open", id: "ejCaa2dm9k7rvk6p5qaC" }), {
+    type: "open",
+    id: "ejCaa2dm9k7rvk6p5qaC",
+});
+assert.equal(parseFromWebview({ type: "open", id: "../x" }), null);
 
 const saved = upsertPack(
     upsertPack([], views[1]!),
@@ -100,6 +131,51 @@ assert.deepEqual(
     }),
     { type: "preview", url: views[0]!.stickers[0]!.url, pack: views[0], x: 12, y: 40 },
 );
+const shot = "data:image/png;base64,aaaa";
+assert.deepEqual(
+    parseFromWebview({
+        type: "preview",
+        url: views[0]!.stickers[0]!.url,
+        pack: views[0],
+        x: 1,
+        y: 2,
+        width: 64,
+        height: 32,
+        src: shot,
+    }),
+    {
+        type: "preview",
+        url: views[0]!.stickers[0]!.url,
+        pack: views[0],
+        x: 1,
+        y: 2,
+        width: 64,
+        height: 32,
+        src: shot,
+    },
+);
+assert.equal(
+    parseFromWebview({
+        type: "preview",
+        url: views[0]!.stickers[0]!.url,
+        pack: views[0],
+        x: 1,
+        y: 2,
+        src: "javascript:alert(1)",
+    })?.src,
+    undefined,
+);
+assert.equal(
+    parseFromWebview({
+        type: "preview",
+        url: views[0]!.stickers[0]!.url,
+        pack: views[0],
+        x: 1,
+        y: 2,
+        src: "data:image/gif;base64,R0lGOD",
+    })?.src,
+    "data:image/gif;base64,R0lGOD",
+);
 assert.equal(
     parseFromWebview({ type: "preview", url: "https://evil.example/x.png", pack: views[0], x: 1, y: 2 }),
     null,
@@ -139,6 +215,16 @@ const webp = (flags: number, extra = "") => {
     bytes.set(tail, 30);
     return bytes;
 };
+assert.equal(imageMime(ascii("GIF89a")), "image/gif");
+assert.equal(stickerBytes(new Uint8Array([1, 2]))?.length, 2);
+assert.equal(stickerBytes(new ArrayBuffer(0)), undefined);
+const carried = parseFromWebview({
+    type: "add",
+    url: views[0]!.stickers[0]!.url,
+    pack: views[0],
+    bytes: new Uint8Array([9]),
+});
+assert.equal(carried?.type === "add" && carried.bytes?.[0], 9);
 assert.equal(isAnimatedImage(ascii("GIF89a")), true);
 assert.equal(isAnimatedImage(png("IHDR")), false);
 assert.equal(isAnimatedImage(png("acTL")), true);

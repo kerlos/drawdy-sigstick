@@ -6,9 +6,13 @@ import type {
 } from "@drawdy/driver-protocol";
 import type { DomElementSchema } from "@drawdy/driver-protocol";
 import {
+    fetchPack,
     fetchSearch,
+    fetchTrending,
     fittedSize,
+    imageMime,
     isAnimatedImage,
+    packFromDetail,
     packsFromSearch,
     packsFromStorage,
     parseFromWebview,
@@ -93,6 +97,8 @@ type Ghost = {
 
 let ghost: Ghost | null = null;
 let ghostUrl: string | null = null;
+/** Pixels already shown in the list. Falls back to the sticker URL. */
+let ghostSrc: string | null = null;
 let ghostGen = 0;
 let ghostChain: Promise<void> = Promise.resolve();
 let ghostPoint: { x: number; y: number } | null = null;
@@ -107,14 +113,22 @@ function pokeGhost(): void {
 function stopGhost(): Promise<void> {
     ghostGen += 1;
     ghostUrl = null;
+    ghostSrc = null;
     ghostPoint = null;
     pokeGhost();
     return ghostChain;
 }
 
-function startGhost(url: string, x: number, y: number): void {
+function startGhost(
+    url: string,
+    x: number,
+    y: number,
+    shown?: { width?: number; height?: number; src?: string },
+): void {
     if (ghostUrl !== url) ghostGen += 1;
     ghostUrl = url;
+    ghostSrc = shown?.src || url;
+    if (shown?.width && shown.height) naturalSize.set(url, { width: shown.width, height: shown.height });
     ghostPoint = { x, y };
     pokeGhost();
 }
@@ -129,12 +143,13 @@ async function flushGhost(): Promise<void> {
     ghostBusy = false;
     const gen = ghostGen;
     const url = ghostUrl;
+    const src = ghostSrc || url;
     const point = ghostPoint;
     ghostPoint = null;
-    if (!url || !point || gen !== ghostGen) {
+    if (!url || !src || !point || gen !== ghostGen) {
         if (gen === ghostGen) await deleteGhost(gen);
     } else {
-        await renderGhost(gen, url, point.x, point.y);
+        await renderGhost(gen, url, src, point.x, point.y);
     }
     if (ghostPoint || ghostGen !== gen) pokeGhost();
 }
@@ -221,7 +236,7 @@ async function naturalOf(url: string): Promise<{ width: number; height: number }
     }
 }
 
-async function renderGhost(gen: number, url: string, x: number, y: number): Promise<void> {
+async function renderGhost(gen: number, url: string, src: string, x: number, y: number): Promise<void> {
     if (!driver || gen !== ghostGen) return;
     const current = driver;
     const located = await cursorOnCanvas({ x, y });
@@ -248,7 +263,7 @@ async function renderGhost(gen: number, url: string, x: number, y: number): Prom
             type: "command:scene:update-drawdy-preview-elements",
             driverId: current.manifest.driverId,
             requestId: nextRequestId(),
-            req: { elements: [ghostImage(ghost.elementId, url, left, top, box.width, box.height)] },
+            req: { elements: [ghostImage(ghost.elementId, src, left, top, box.width, box.height)] },
         });
         return;
     }
@@ -259,7 +274,7 @@ async function renderGhost(gen: number, url: string, x: number, y: number): Prom
         type: "command:scene:create-drawdy-preview-elements",
         driverId: current.manifest.driverId,
         requestId: nextRequestId(),
-        req: { elements: [ghostImage(elementId, url, left, top, box.width, box.height)] },
+        req: { elements: [ghostImage(elementId, src, left, top, box.width, box.height)] },
     });
     if (!driver || created.res.error !== undefined || !created.res.value) return;
     const previewId = created.res.value.previewId;
@@ -268,6 +283,14 @@ async function renderGhost(gen: number, url: string, x: number, y: number): Prom
         return;
     }
     ghost = { previewId, elementId, url, width: box.width, height: box.height };
+}
+
+function dataUrl(bytes: Uint8Array): string {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return `data:${imageMime(bytes)};base64,${btoa(binary)}`;
 }
 
 /** DOM image, same path Drawdy uses for a pasted GIF, so the browser keeps the frames. */
@@ -285,21 +308,27 @@ function animatedSchema(url: string, width: number, height: number): DomElementS
     };
 }
 
-async function placeSticker(url: string, drop?: { x: number; y: number }): Promise<void> {
+async function placeSticker(
+    url: string,
+    drop?: { x: number; y: number },
+    bytes?: Uint8Array,
+): Promise<void> {
     if (!driver) return;
     const current = driver;
 
-    let blob: Blob;
-    let animated = false;
-    try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        blob = await res.blob();
-        animated = isAnimatedImage(new Uint8Array(await blob.arrayBuffer()));
-    } catch {
-        post({ type: "status", message: "Could not download that sticker." });
-        return;
+    let raw = bytes;
+    if (!raw) {
+        try {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            raw = new Uint8Array(await res.arrayBuffer());
+        } catch {
+            post({ type: "status", message: "Could not download that sticker." });
+            return;
+        }
     }
+    const blob = new Blob([raw], { type: imageMime(raw) });
+    const animated = isAnimatedImage(raw);
 
     const info = await current.issueCommand({
         type: "command:camera:get-info",
@@ -361,7 +390,7 @@ async function placeSticker(url: string, drop?: { x: number; y: number }): Promi
                           y,
                           width,
                           height,
-                          schema: animatedSchema(url, width, height),
+                          schema: animatedSchema(dataUrl(raw), width, height),
                       }
                     : {
                           type: "image",
@@ -387,11 +416,36 @@ async function placeSticker(url: string, drop?: { x: number; y: number }): Promi
     post({ type: "status", message: "Added to the board." });
 }
 
+async function sendTrending(): Promise<void> {
+    try {
+        post({ type: "trending", packs: packsFromSearch(await fetchTrending()) });
+    } catch (err) {
+        post({
+            type: "status",
+            message: err instanceof Error ? err.message : "Could not load trending packs.",
+        });
+    }
+}
+
 async function handleWebviewMessage(message: FromWebview): Promise<void> {
     switch (message.type) {
         case "ready": {
             post({ type: "theme", css: stylingCss(driver?.styling ?? {}) });
             post({ type: "library", packs: await loadLibrary() });
+            await sendTrending();
+            return;
+        }
+        case "open": {
+            try {
+                const pack = packFromDetail(await fetchPack(message.id));
+                if (!pack) throw new Error("That pack is gone.");
+                post({ type: "pack", pack });
+            } catch (err) {
+                post({
+                    type: "status",
+                    message: err instanceof Error ? err.message : "Could not open that pack.",
+                });
+            }
             return;
         }
         case "search": {
@@ -413,7 +467,11 @@ async function handleWebviewMessage(message: FromWebview): Promise<void> {
             return;
         }
         case "preview":
-            startGhost(message.url, message.x, message.y);
+            startGhost(message.url, message.x, message.y, {
+                width: message.width,
+                height: message.height,
+                src: message.src,
+            });
             return;
         case "preview-move":
             moveGhost(message.x, message.y);
@@ -426,7 +484,7 @@ async function handleWebviewMessage(message: FromWebview): Promise<void> {
                 message.x === undefined || message.y === undefined
                     ? undefined
                     : { x: message.x, y: message.y };
-            await placeSticker(message.url, drop);
+            await placeSticker(message.url, drop, message.bytes);
             await stopGhost();
             await remember(message.pack);
             return;
@@ -515,6 +573,7 @@ export const onEvent: DriverModule["onEvent"] = async (event) => {
             if (driver && res.res.value?.created === false) {
                 post({ type: "theme", css: stylingCss(driver.styling) });
                 post({ type: "library", packs: await loadLibrary() });
+                await sendTrending();
             }
             return;
         }

@@ -87,6 +87,31 @@ main { flex: 1; overflow-y: auto; padding: 4px var(--dd-space-16, 16px) var(--dd
   border-radius: var(--dd-radius-md, 6px);
   border: 1px solid var(--dd-divider, #eee);
 }
+.frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.frame img.pending { opacity: 0; }
+.spin {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--dd-border-medium, #ddd);
+  border-top-color: var(--dd-text-tertiary, #888);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.thumb .spin { width: 12px; height: 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.cell .frame { width: 100%; aspect-ratio: 1; }
 .pack-copy { min-width: 0; flex: 1; }
 .pack-title {
   margin: 0;
@@ -269,7 +294,9 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
 (function () {
   var api = acquireDrawdyApi();
   var library = [];
+  var trending = [];
   var results = [];
+  var listPacks = [];
   var requestSeq = 0;
   var activeRequest = 0;
   var openPack = null;
@@ -299,14 +326,100 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
     return ids;
   }
 
-  function makeImg(url, className, alt) {
+  var files = {};
+  var fileBlobs = {};
+  var localUrls = [];
+
+  function sniffType(bytes) {
+    if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return "image/gif";
+    if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+    if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return "image/webp";
+    if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
+    return "application/octet-stream";
+  }
+
+  function bytesToDataUrl(bytes, mime) {
+    var binary = "";
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return "data:" + mime + ";base64," + btoa(binary);
+  }
+
+  function holdFile(url) {
+    if (!files[url]) {
+      files[url] = fetch(url).then(function (res) {
+        if (!res.ok) throw new Error(String(res.status));
+        return res.arrayBuffer();
+      }).then(function (buffer) {
+        var blob = new Blob([buffer], { type: sniffType(new Uint8Array(buffer)) });
+        fileBlobs[url] = blob;
+        return blob;
+      });
+    }
+    return files[url];
+  }
+
+  function releaseHeld() {
+    for (var i = 0; i < localUrls.length; i++) URL.revokeObjectURL(localUrls[i]);
+    localUrls = [];
+  }
+
+  function makeImg(url, className, alt, held) {
+    var frame = document.createElement("span");
+    frame.className = "frame" + (className ? " " + className : "");
+    var spin = document.createElement("span");
+    spin.className = "spin";
+    spin.setAttribute("aria-hidden", "true");
+    frame.appendChild(spin);
     var image = document.createElement("img");
-    image.className = className;
+    image.className = "pending";
     image.alt = alt || "";
     image.draggable = false;
     image.referrerPolicy = "no-referrer";
-    image.src = url;
-    return image;
+    frame.appendChild(image);
+    function finish(ok) {
+      spin.remove();
+      if (ok) image.classList.remove("pending");
+      else image.removeAttribute("src");
+    }
+    function use(src) {
+      image.addEventListener("load", function () { finish(true); });
+      image.addEventListener("error", function () { finish(false); });
+      image.src = src;
+      if (image.complete) finish(image.naturalWidth > 0);
+    }
+    if (!held) use(url);
+    else {
+      holdFile(url).then(function (blob) {
+        var local = URL.createObjectURL(blob);
+        localUrls.push(local);
+        use(local);
+      }, function () {
+        use(url);
+      });
+    }
+    return frame;
+  }
+
+  // ponytail: drag ghost is one decoded frame. The board receives the same file bytes.
+  function listedImage(img) {
+    var width = img && img.naturalWidth;
+    var height = img && img.naturalHeight;
+    if (!width || !height) return null;
+    var scale = 180 / Math.max(width, height);
+    var canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    var src = "";
+    try {
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      src = canvas.toDataURL("image/png");
+    } catch (e) {
+      src = "";
+    }
+    if (src.length > 200000) src = "";
+    return { width: width, height: height, src: src };
   }
 
   function thumbs(pack, className) {
@@ -319,7 +432,7 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
     return row;
   }
 
-  function packCard(pack, saved) {
+  function packCard(pack, saved, list) {
     var button = document.createElement("button");
     button.type = "button";
     button.className = "pack";
@@ -350,35 +463,48 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
     copy.appendChild(actions);
     button.appendChild(copy);
     button.addEventListener("click", function () {
-      openModal(pack, saved ? [] : others(pack.id));
+      openModal(pack, saved ? [] : list);
     });
     return button;
   }
 
   function others(id) {
     var out = [];
-    for (var i = 0; i < results.length; i++) {
-      if (results[i].id !== id) out.push(results[i]);
+    for (var i = 0; i < listPacks.length; i++) {
+      if (listPacks[i].id !== id) out.push(listPacks[i]);
     }
     return out;
+  }
+
+  function section(title) {
+    var label = document.createElement("div");
+    label.className = "section-label";
+    label.textContent = title;
+    main.appendChild(label);
   }
 
   function renderMain() {
     main.innerHTML = "";
     var query = search.value.trim();
     if (!query) {
-      if (library.length === 0) {
+      if (library.length === 0 && trending.length === 0) {
         var empty = document.createElement("div");
         empty.className = "empty";
         empty.textContent = "Search SigStick to find a pack.";
         main.appendChild(empty);
         return;
       }
-      var label = document.createElement("div");
-      label.className = "section-label";
-      label.textContent = "Your list";
-      main.appendChild(label);
-      for (var i = 0; i < library.length; i++) main.appendChild(packCard(library[i], true));
+      var ids = savedIds();
+      if (library.length) {
+        section("Your list");
+        for (var i = 0; i < library.length; i++) main.appendChild(packCard(library[i], true, []));
+      }
+      if (trending.length) {
+        section("Trending");
+        for (var t = 0; t < trending.length; t++) {
+          main.appendChild(packCard(trending[t], !!ids[trending[t].id], trending));
+        }
+      }
       return;
     }
     if (results.length === 0) {
@@ -389,7 +515,9 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       return;
     }
     var ids = savedIds();
-    for (var j = 0; j < results.length; j++) main.appendChild(packCard(results[j], !!ids[results[j].id]));
+    for (var j = 0; j < results.length; j++) {
+      main.appendChild(packCard(results[j], !!ids[results[j].id], results));
+    }
   }
 
   function paintSave() {
@@ -401,6 +529,27 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
   }
 
   var DRAG_THRESHOLD = 5;
+
+  function sendAdd(url, x, y) {
+    var body = { type: "add", url: url, pack: openPack };
+    if (typeof x === "number") {
+      body.x = x;
+      body.y = y;
+    }
+    var pending = files[url];
+    if (!pending) {
+      api.postMessage(body);
+      return;
+    }
+    pending.then(function (blob) {
+      return blob.arrayBuffer();
+    }).then(function (buffer) {
+      body.bytes = buffer;
+      api.postMessage(body, [buffer]);
+    }, function () {
+      api.postMessage(body);
+    });
+  }
 
   function bindPlace(cell, url) {
     var startX = 0;
@@ -422,7 +571,27 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
         if (!pressing || !dragging) return;
         if (!previewSent) {
           previewSent = true;
-          api.postMessage({ type: "preview", url: url, pack: openPack, x: hoverX, y: hoverY });
+          var shot = listedImage(cell.querySelector("img"));
+          var message = { type: "preview", url: url, pack: openPack, x: hoverX, y: hoverY };
+          if (shot) {
+            message.width = shot.width;
+            message.height = shot.height;
+          }
+          var blob = fileBlobs[url];
+          if (blob && (blob.type === "image/gif" || blob.type === "image/webp")) {
+            blob.arrayBuffer().then(function (buffer) {
+              var gifSrc = bytesToDataUrl(new Uint8Array(buffer), blob.type);
+              if (gifSrc.length <= 2000000) message.src = gifSrc;
+              else if (shot && shot.src) message.src = shot.src;
+              api.postMessage(message);
+            }, function () {
+              if (shot && shot.src) message.src = shot.src;
+              api.postMessage(message);
+            });
+          } else {
+            if (shot && shot.src) message.src = shot.src;
+            api.postMessage(message);
+          }
         } else {
           api.postMessage({ type: "preview-move", x: hoverX, y: hoverY });
         }
@@ -464,11 +633,8 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       pressing = false;
       fromPointer = true;
       previewSent = false;
-      if (dragging) {
-        api.postMessage({ type: "add", url: url, pack: openPack, x: e.clientX, y: e.clientY });
-      } else {
-        api.postMessage({ type: "add", url: url, pack: openPack });
-      }
+      if (dragging) sendAdd(url, e.clientX, e.clientY);
+      else sendAdd(url);
     });
 
     cell.addEventListener("pointercancel", function (e) {
@@ -485,12 +651,13 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
         e.preventDefault();
         return;
       }
-      api.postMessage({ type: "add", url: url, pack: openPack });
+      sendAdd(url);
     });
   }
 
   function renderModal() {
     if (!openPack) return;
+    releaseHeld();
     document.getElementById("modal-cover").src = openPack.coverUrl;
     document.getElementById("modal-cover").alt = openPack.title;
     document.getElementById("modal-title").textContent = openPack.title;
@@ -506,7 +673,7 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       cell.className = "cell";
       cell.setAttribute("aria-label", openPack.title);
       cell.title = "Drag onto the board, or click to place in the center";
-      cell.appendChild(makeImg(sticker.url, "", openPack.title));
+      cell.appendChild(makeImg(sticker.url, "", openPack.title, true));
       bindPlace(cell, sticker.url);
       grid.appendChild(cell);
     }
@@ -534,20 +701,23 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       card.appendChild(author);
       card.appendChild(thumbs(pack, "thumb"));
       card.addEventListener("click", function (next) {
-        return function () { openModal(next, others(next.id)); };
+        return function () { openModal(next, listPacks); };
       }(pack));
       row.appendChild(card);
     }
   }
 
-  function openModal(pack, nextSiblings) {
+  function openModal(pack, list) {
+    listPacks = list || [];
     openPack = pack;
-    siblings = nextSiblings;
+    siblings = others(pack.id);
     modal.hidden = false;
     renderModal();
+    api.postMessage({ type: "open", id: pack.id });
   }
 
   function closeModal() {
+    releaseHeld();
     openPack = null;
     siblings = [];
     modal.hidden = true;
@@ -594,6 +764,17 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       library = raw.packs || [];
       renderMain();
       if (openPack) paintSave();
+      return;
+    }
+    if (raw.type === "trending") {
+      trending = raw.packs || [];
+      if (!search.value.trim()) renderMain();
+      return;
+    }
+    if (raw.type === "pack") {
+      if (!openPack || !raw.pack || raw.pack.id !== openPack.id) return;
+      openPack = raw.pack;
+      renderModal();
       return;
     }
     if (raw.type === "status") {

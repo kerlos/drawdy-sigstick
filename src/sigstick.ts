@@ -1,10 +1,11 @@
-import type { PackView, SigStickSearchResultResponse } from "./types.ts";
+import type { PackView } from "./types.ts";
 
 export type { PackView };
 
-/** Drawdy backend proxy. SigStick itself sends no Access-Control-Allow-Origin. */
-export const SEARCH_API =
-    "https://backend.drawdy.io/api/sigstick/search?keyword=";
+/** api.sigstick.com sends Access-Control-Allow-Origin: *. */
+export const TRENDING_API = "https://api.sigstick.com/v1/stickerPack/trending?region=th";
+export const SEARCH_API = "https://api.sigstick.com/v1/stickerPack?keyword=";
+const PACK_API = "https://api.sigstick.com/v1/stickerPack/";
 
 export const MAX_RESULTS = 100;
 export const PREVIEW_COUNT = 6;
@@ -15,6 +16,10 @@ const MAX_STICKERS = 500;
 
 export function searchApiUrl(keyword: string): string {
     return SEARCH_API + encodeURIComponent(keyword.trim().slice(0, 200));
+}
+
+export function packApiUrl(id: string): string {
+    return PACK_API + encodeURIComponent(id);
 }
 
 function httpUrl(value: unknown): string | null {
@@ -46,29 +51,70 @@ export function asPack(value: unknown): PackView | null {
     };
 }
 
-export function packsFromSearch(data: unknown): PackView[] {
+function rawPacks(data: unknown): unknown[] {
     if (!data || typeof data !== "object") return [];
-    const record = data as {
-        pageProps?: { packs?: unknown };
-        packs?: unknown;
+    const record = data as Record<string, unknown>;
+    const page = record.pageProps;
+    if (page && typeof page === "object") {
+        const packs = (page as Record<string, unknown>).packs;
+        if (Array.isArray(packs)) return packs;
+    }
+    if (Array.isArray(record.packs)) return record.packs;
+    const inner = record.data;
+    if (Array.isArray(inner)) return inner;
+    if (inner && typeof inner === "object") {
+        const box = inner as Record<string, unknown>;
+        if (Array.isArray(box.packs)) return box.packs;
+        if (Array.isArray(box.stickerPacks)) return box.stickerPacks;
+    }
+    return [];
+}
+
+function viewFromRow(pack: unknown): PackView | null {
+    if (!pack || typeof pack !== "object") return null;
+    const row = pack as {
+        id?: unknown;
+        title?: unknown;
+        author?: unknown;
+        cover?: { url?: unknown };
+        stickers?: unknown;
     };
-    const packs = record.pageProps?.packs ?? record.packs;
-    if (!Array.isArray(packs)) return [];
+    return asPack({
+        id: row.id,
+        title: row.title,
+        author: row.author,
+        coverUrl: row.cover?.url,
+        stickers: row.stickers,
+    });
+}
+
+export function packsFromSearch(data: unknown): PackView[] {
     const out: PackView[] = [];
-    for (const pack of packs) {
+    for (const pack of rawPacks(data)) {
         if (out.length >= MAX_RESULTS) break;
-        if (!pack || typeof pack !== "object") continue;
-        const row = pack as SigStickSearchResultResponse["pageProps"]["packs"][number];
-        const view = asPack({
-            id: row.id,
-            title: row.title,
-            author: row.author,
-            coverUrl: row.cover?.url,
-            stickers: row.stickers,
-        });
+        const view = viewFromRow(pack);
         if (view) out.push(view);
     }
     return out;
+}
+
+function detailRecord(data: unknown): Record<string, unknown> | null {
+    if (!data || typeof data !== "object") return null;
+    return data as Record<string, unknown>;
+}
+
+/** One pack from the Drawdy proxy `{ pack }` or a Next `{ pageProps.pack }`. */
+export function packFromDetail(data: unknown): PackView | null {
+    const record = detailRecord(data);
+    if (!record) return null;
+    const page = record.pageProps;
+    if (page && typeof page === "object" && "pack" in page) {
+        return viewFromRow((page as { pack: unknown }).pack);
+    }
+    if (record.pack && typeof record.pack === "object") return viewFromRow(record.pack);
+    const inner = record.data;
+    if (inner && typeof inner === "object" && !Array.isArray(inner)) return viewFromRow(inner);
+    return null;
 }
 
 export function previewStickers(pack: PackView): Array<{ url: string }> {
@@ -144,16 +190,23 @@ export function stylingCss(styling: object): string {
     return parts.join("");
 }
 
-export async function fetchSearch(keyword: string): Promise<unknown> {
+async function fetchJson(url: string, what: string): Promise<unknown> {
     let res: Response;
     try {
-        res = await fetch(searchApiUrl(keyword));
+        res = await fetch(url);
     } catch {
-        throw new Error("Could not reach SigStick search.");
+        throw new Error(`Could not reach SigStick ${what}.`);
     }
-    if (!res.ok) throw new Error(`SigStick search failed (HTTP ${res.status}).`);
+    if (!res.ok) throw new Error(`SigStick ${what} failed (HTTP ${res.status}).`);
     return await res.json();
 }
+
+export const fetchTrending = (): Promise<unknown> => fetchJson(TRENDING_API, "trending");
+
+export const fetchSearch = (keyword: string): Promise<unknown> =>
+    fetchJson(searchApiUrl(keyword), "search");
+
+export const fetchPack = (id: string): Promise<unknown> => fetchJson(packApiUrl(id), "pack");
 
 const FOUR = (bytes: Uint8Array, at: number) =>
     String.fromCharCode(bytes[at]!, bytes[at + 1]!, bytes[at + 2]!, bytes[at + 3]!);
@@ -201,6 +254,28 @@ export function isAnimatedImage(bytes: Uint8Array): boolean {
     return false;
 }
 
+export function imageMime(bytes: Uint8Array): string {
+    if (bytes.length >= 6 && FOUR(bytes, 0) === "GIF8") return "image/gif";
+    if (bytes.length >= 8 && bytes[0] === 0x89 && FOUR(bytes, 1) === "PNG\r") return "image/png";
+    if (bytes.length >= 12 && FOUR(bytes, 0) === "RIFF" && FOUR(bytes, 8) === "WEBP") return "image/webp";
+    if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
+    return "application/octet-stream";
+}
+
+/** ponytail: one sticker file, not a pack. Bigger files fall back to a fresh download. */
+const MAX_FILE = 12_000_000;
+
+export function stickerBytes(value: unknown): Uint8Array | undefined {
+    const bytes =
+        value instanceof Uint8Array
+            ? value
+            : value instanceof ArrayBuffer
+              ? new Uint8Array(value)
+              : undefined;
+    if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MAX_FILE) return undefined;
+    return bytes;
+}
+
 /** Fit a sticker inside a square of `maxEdge` canvas units, keeping its aspect ratio. */
 export function fittedSize(
     width: number,
@@ -217,8 +292,19 @@ export function fittedSize(
 export type FromWebview =
     | { type: "ready" }
     | { type: "search"; requestId: number; keyword: string }
-    | { type: "add"; url: string; pack: PackView; x?: number; y?: number }
-    | { type: "preview"; url: string; pack: PackView; x: number; y: number }
+    | { type: "open"; id: string }
+    | { type: "add"; url: string; pack: PackView; x?: number; y?: number; bytes?: Uint8Array }
+    | {
+          type: "preview";
+          url: string;
+          pack: PackView;
+          x: number;
+          y: number;
+          width?: number;
+          height?: number;
+          /** Data URL of the sticker already painted in the list. */
+          src?: string;
+      }
     | { type: "preview-move"; x: number; y: number }
     | { type: "preview-end" }
     | { type: "save"; pack: PackView }
@@ -241,6 +327,11 @@ export function parseFromWebview(message: unknown): FromWebview | null {
     if (!message || typeof message !== "object") return null;
     const body = message as Record<string, unknown>;
     if (body.type === "ready") return { type: "ready" };
+    if (body.type === "open") {
+        return typeof body.id === "string" && /^[A-Za-z0-9]{1,64}$/.test(body.id)
+            ? { type: "open", id: body.id }
+            : null;
+    }
     if (body.type === "search") {
         if (typeof body.requestId !== "number" || typeof body.keyword !== "string") {
             return null;
@@ -261,16 +352,42 @@ export function parseFromWebview(message: unknown): FromWebview | null {
     if (body.type === "add") {
         const sticker = ownedSticker(body);
         if (!sticker) return null;
+        const bytes = stickerBytes(body.bytes);
+        const file = bytes ? { bytes } : {};
         const hasX = body.x !== undefined;
         const hasY = body.y !== undefined;
-        if (!hasX && !hasY) return { type: "add", ...sticker };
+        if (!hasX && !hasY) return { type: "add", ...sticker, ...file };
         const point = finitePoint(body.x, body.y);
-        return point ? { type: "add", ...sticker, ...point } : null;
+        return point ? { type: "add", ...sticker, ...point, ...file } : null;
     }
     if (body.type === "preview") {
         const sticker = ownedSticker(body);
         const point = finitePoint(body.x, body.y);
-        return sticker && point ? { type: "preview", ...sticker, ...point } : null;
+        if (!sticker || !point) return null;
+        const width = body.width;
+        const height = body.height;
+        const sized =
+            typeof width === "number" &&
+            typeof height === "number" &&
+            width >= 1 &&
+            height >= 1 &&
+            width <= 4096 &&
+            height <= 4096 &&
+            Number.isFinite(width) &&
+            Number.isFinite(height);
+        const src =
+            typeof body.src === "string" &&
+            /^data:image\/(png|gif|webp);base64,/.test(body.src) &&
+            body.src.length <= 2_000_000
+                ? body.src
+                : undefined;
+        return {
+            type: "preview",
+            ...sticker,
+            ...point,
+            ...(sized ? { width, height } : {}),
+            ...(src ? { src } : {}),
+        };
     }
     if (body.type === "preview-move") {
         const point = finitePoint(body.x, body.y);
