@@ -436,23 +436,54 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
     return "data:" + mime + ";base64," + btoa(binary);
   }
 
+  // ponytail: 4 downloads at a time. The CDN rate-limits a full pack grid.
+  var fetchWait = [];
+  var fetchActive = 0;
+
+  function pumpFetches() {
+    while (fetchActive < 4 && fetchWait.length) {
+      fetchActive++;
+      fetchWait.shift()();
+    }
+  }
+
   function holdFile(url) {
     if (!files[url]) {
-      files[url] = fetch(url).then(function (res) {
-        if (!res.ok) throw new Error(String(res.status));
-        return res.arrayBuffer();
-      }).then(function (buffer) {
-        var shown = loopApng(new Uint8Array(buffer));
-        fileNet[url] = repeatsFromNetwork(shown);
-        fileAnim[url] = fileNet[url] || apngPlaysAt(shown) >= 0;
-        if (fileAnim[url] && !fileNet[url]) filePng[url] = shown;
-        var blob = new Blob([shown], { type: sniffType(shown) });
-        fileBlobs[url] = blob;
-        return blob;
+      files[url] = new Promise(function (resolve, reject) {
+        fetchWait.push(function () {
+          fetch(url).then(function (res) {
+            if (!res.ok) throw new Error(String(res.status));
+            return res.arrayBuffer();
+          }).then(function (buffer) {
+            var shown = loopApng(new Uint8Array(buffer));
+            fileNet[url] = repeatsFromNetwork(shown);
+            fileAnim[url] = fileNet[url] || apngPlaysAt(shown) >= 0;
+            if (fileAnim[url] && !fileNet[url]) filePng[url] = shown;
+            var blob = new Blob([shown], { type: sniffType(shown) });
+            fileBlobs[url] = blob;
+            resolve(blob);
+          }).catch(function (err) {
+            delete files[url];
+            reject(err);
+          }).then(function () {
+            fetchActive--;
+            pumpFetches();
+          });
+        });
       });
+      pumpFetches();
     }
     return files[url];
   }
+
+  var lazy = window.IntersectionObserver ? new IntersectionObserver(function (entries) {
+    for (var i = 0; i < entries.length; i++) {
+      if (!entries[i].isIntersecting) continue;
+      lazy.unobserve(entries[i].target);
+      var start = entries[i].target._load;
+      if (start) start();
+    }
+  }, { rootMargin: "160px" }) : null;
 
   function releaseHeld() {
     for (var i = 0; i < localUrls.length; i++) URL.revokeObjectURL(localUrls[i]);
@@ -483,8 +514,7 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       image.src = src;
       if (image.complete) finish(image.naturalWidth > 0);
     }
-    if (!held) use(url);
-    else {
+    function load() {
       holdFile(url).then(function (blob) {
         var png = filePng[url];
         if (png) {
@@ -501,6 +531,12 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       }, function () {
         use(url);
       });
+    }
+    if (!held) use(url);
+    else if (!lazy) load();
+    else {
+      frame._load = load;
+      lazy.observe(frame);
     }
     return frame;
   }
@@ -933,6 +969,7 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       results = raw.packs || [];
       setStatus("");
       renderMain();
+      main.scrollTop = 0;
       return;
     }
   });
