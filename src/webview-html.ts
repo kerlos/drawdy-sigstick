@@ -563,12 +563,16 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
     return { width: width, height: height, src: src };
   }
 
+  function thumb256(url) {
+    return url.replace(/(\.[a-z0-9]+)$/i, ".thumb256$1");
+  }
+
   function thumbs(pack, className) {
     var row = document.createElement("div");
     row.className = "thumbs";
     var n = Math.min(4, pack.stickers.length);
     for (var i = 0; i < n; i++) {
-      row.appendChild(makeImg(pack.stickers[i].url, className, "", true));
+      row.appendChild(makeImg(thumb256(pack.stickers[i].url), className, "", true));
     }
     return row;
   }
@@ -577,7 +581,7 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
     var button = document.createElement("button");
     button.type = "button";
     button.className = "pack";
-    button.appendChild(makeImg(pack.coverUrl, "cover", pack.title, true));
+    button.appendChild(makeImg(thumb256(pack.coverUrl), "cover", pack.title, true));
     var copy = document.createElement("div");
     copy.className = "pack-copy";
     var title = document.createElement("p");
@@ -826,7 +830,7 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       cell.className = "cell";
       cell.setAttribute("aria-label", openPack.title);
       cell.title = "Drag onto the board, or click to place in the center";
-      cell.appendChild(makeImg(sticker.url, "", openPack.title, true));
+      cell.appendChild(makeImg(thumb256(sticker.url), "", openPack.title, false));
       bindPlace(cell, sticker.url);
       grid.appendChild(cell);
     }
@@ -843,7 +847,7 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       var card = document.createElement("button");
       card.type = "button";
       card.className = "discover-card";
-      card.appendChild(makeImg(pack.coverUrl, "cover", pack.title, true));
+      card.appendChild(makeImg(thumb256(pack.coverUrl), "cover", pack.title, true));
       var title = document.createElement("p");
       title.className = "pack-title";
       title.textContent = pack.title;
