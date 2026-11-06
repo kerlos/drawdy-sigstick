@@ -532,12 +532,12 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
         use(url);
       });
     }
-    if (!held) use(url);
-    else if (!lazy) load();
-    else {
+    // Thumb APNGs keep num_plays=1, so a direct CDN url stops after one run.
+    if (held && lazy) {
       frame._load = load;
       lazy.observe(frame);
-    }
+    } else if (held || /\\.png$/i.test(url)) load();
+    else use(url);
     return frame;
   }
 

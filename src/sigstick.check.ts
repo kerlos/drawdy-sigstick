@@ -271,6 +271,7 @@ assert.equal(loops.repeatsFromNetwork(png("IHDR")), false);
 assert.equal(loops.repeatsFromNetwork(webp(0x02)), true);
 assert.equal(loops.repeatsFromNetwork(ascii("not-an-image")), false);
 assert.match(WEBVIEW_HTML, /if \(fileNet\[url\]\)/);
+assert.match(WEBVIEW_HTML, /held \|\| \/\\.png\$\/i\.test\(url\)/);
 const driver = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
 assert.match(driver, /dataUrl\(shown\)/);
 assert.match(driver, /animatedSchema\(url,/);
