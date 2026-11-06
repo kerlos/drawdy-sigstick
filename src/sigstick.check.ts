@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { WEBVIEW_HTML } from "./webview-html.ts";
 import {
     LIBRARY_CAP,
     MAX_RESULTS,
@@ -8,6 +10,7 @@ import {
     fittedSize,
     imageMime,
     isAnimatedImage,
+    loopApng,
     stickerBytes,
     packApiUrl,
     packFromDetail,
@@ -15,6 +18,7 @@ import {
     packsFromStorage,
     parseFromWebview,
     previewStickers,
+    authorApiUrl,
     searchApiUrl,
     stylingCss,
     upsertPack,
@@ -233,6 +237,11 @@ assert.equal(isAnimatedImage(webp(0x02)), true);
 assert.equal(isAnimatedImage(webp(0x00, "ANIM\0\0\0\0")), true);
 assert.equal(isAnimatedImage(ascii("not-an-image")), false);
 assert.equal(parseFromWebview({ type: "search", requestId: "1", keyword: "cat" }), null);
+assert.equal(authorApiUrl(" pgyuuun "), "https://api.sigstick.com/v1/stickerPack?author=pgyuuun");
+assert.equal(
+    parseFromWebview({ type: "search", requestId: 1, keyword: "x", author: " pgyuuun " })?.author,
+    "pgyuuun",
+);
 
 const css = stylingCss({
     theme: "dark",
@@ -247,5 +256,38 @@ const light = stylingCss({ theme: "light", mutedForeground: "#777", border: "#cc
 assert.match(light, /--dd-text-secondary:#777/);
 assert.match(light, /--dd-divider:#ccc/);
 assert.match(light, /--dd-interaction-hover:rgba\(0,0,0,0\.06\)/);
+
+const script = WEBVIEW_HTML.slice(
+    WEBVIEW_HTML.indexOf("function sniffType"),
+    WEBVIEW_HTML.indexOf("function holdFile"),
+);
+const loops = new Function(`${script} return { repeatsFromNetwork, loopApng };`)() as {
+    repeatsFromNetwork: (bytes: Uint8Array) => boolean;
+    loopApng: (bytes: Uint8Array) => Uint8Array;
+};
+assert.equal(loops.repeatsFromNetwork(ascii("GIF89a")), true);
+assert.equal(loops.repeatsFromNetwork(png("acTL")), false);
+assert.equal(loops.repeatsFromNetwork(png("IHDR")), false);
+assert.equal(loops.repeatsFromNetwork(webp(0x02)), true);
+assert.equal(loops.repeatsFromNetwork(ascii("not-an-image")), false);
+assert.match(WEBVIEW_HTML, /if \(fileNet\[url\]\)/);
+const driver = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+assert.match(driver, /dataUrl\(shown\)/);
+assert.match(driver, /animatedSchema\(url,/);
+
+// Real acTL from cdn2 LstgBavd8KjXOKmwtra2/0-1.png: 8 frames, play once.
+const once = Uint8Array.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x08, 0x61, 0x63, 0x54,
+    0x4c, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0xce, 0x3a, 0xbb, 0x47,
+]);
+const forever = loopApng(once);
+assert.notEqual(forever, once);
+assert.equal(forever[20] | forever[21] | forever[22] | forever[23], 0);
+assert.deepEqual(Array.from(forever.subarray(24, 28)), [0xb9, 0x3d, 0x8b, 0xd1]);
+assert.equal(loopApng(forever), forever);
+assert.equal(loops.loopApng(once)[23], 0);
+assert.deepEqual(Array.from(loops.loopApng(once).subarray(24, 28)), [0xb9, 0x3d, 0x8b, 0xd1]);
+const gif = ascii("GIF89a");
+assert.equal(loopApng(gif), gif);
 
 console.log("sigstick check ok");

@@ -58,13 +58,14 @@ main { flex: 1; overflow-y: auto; padding: 4px var(--dd-space-16, 16px) var(--dd
 }
 .pack {
   display: flex;
+  align-items: flex-start;
   gap: var(--dd-space-12, 12px);
   width: 100%;
   text-align: left;
-  padding: var(--dd-space-8, 8px);
-  margin: 0 0 var(--dd-space-8, 8px);
-  background: var(--dd-surface-elevated, #fff);
-  border: 1px solid var(--dd-border-subtle, #e8e8e8);
+  padding: 10px 4px;
+  margin: 0;
+  background: transparent;
+  border: 0;
   border-radius: var(--dd-radius-lg, 8px);
   color: inherit;
   cursor: pointer;
@@ -112,13 +113,25 @@ main { flex: 1; overflow-y: auto; padding: 4px var(--dd-space-16, 16px) var(--dd
 .thumb .spin { width: 12px; height: 12px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .cell .frame { width: 100%; aspect-ratio: 1; }
-.pack-copy { min-width: 0; flex: 1; }
+.pack > .frame.cover {
+  width: 96px;
+  height: 96px;
+  flex: none;
+  border: 0;
+  border-radius: 16px;
+}
+.pack > .frame.cover img { object-fit: cover; }
+.pack-copy { min-width: 0; flex: 1; padding-top: 2px; }
 .pack-title {
   margin: 0;
-  font-size: var(--dd-type-label-size, 12px);
-  line-height: var(--dd-type-label-line, 16px);
-  font-weight: var(--dd-type-label-weight, 500);
-  color: var(--dd-text-primary, inherit);
+  font-size: 16px;
+  line-height: 1.25;
+  font-weight: 700;
+  color: var(--dd-accent, #3b6cff);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .pack-author, .meta {
   margin: 0;
@@ -126,13 +139,35 @@ main { flex: 1; overflow-y: auto; padding: 4px var(--dd-space-16, 16px) var(--dd
   line-height: 16px;
   color: var(--dd-text-tertiary, #888);
 }
+.pack-author {
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pack-author.is-link, .author-link { cursor: pointer; }
+.pack-author.is-link:hover, .author-link:hover { text-decoration: underline; }
 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.pack .thumbs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
 .thumb {
   width: 44px;
   height: 44px;
   border-radius: var(--dd-radius-sm, 4px);
   border: 1px solid var(--dd-divider, #eee);
 }
+.pack .thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 8px;
+}
+.pack .thumb img { object-fit: cover; }
 .row-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
 .linkish {
   border: 0;
@@ -166,23 +201,26 @@ main { flex: 1; overflow-y: auto; padding: 4px var(--dd-space-16, 16px) var(--dd
   overflow: hidden;
 }
 .modal-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--dd-space-12, 12px);
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--dd-space-12, 12px);
+  row-gap: 10px;
+  align-items: start;
   padding: var(--dd-space-12, 12px) var(--dd-space-16, 16px);
   border-bottom: 1px solid var(--dd-divider, #eee);
 }
-.modal-head .cover { width: 64px; height: 64px; }
-.modal-head .titles { min-width: 0; flex: 1; }
+.modal-head .cover { width: 72px; height: 72px; border-radius: 12px; }
+.modal-head .titles { min-width: 0; }
 #modal-title {
   margin: 0;
   font-size: var(--dd-type-heading-size, 14px);
   line-height: var(--dd-type-heading-line, 20px);
   font-weight: var(--dd-type-heading-weight, 600);
   color: var(--dd-text-primary, inherit);
+  overflow-wrap: break-word;
 }
-.modal-actions { display: flex; gap: 6px; flex: none; }
+#modal-author { overflow-wrap: break-word; }
+.modal-actions { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; }
 button.solid, button.ghost {
   height: var(--dd-control-sm, 30px);
   padding: 0 10px;
@@ -224,7 +262,7 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
   touch-action: none;
   user-select: none;
 }
-.cell.dragging { opacity: 0.45; cursor: grabbing; }
+.cell.dragging { cursor: grabbing; }
 .cell img {
   display: block;
   width: 100%;
@@ -338,6 +376,58 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
     return "application/octet-stream";
   }
 
+  var fileAnim = {};
+  var fileNet = {};
+  var filePng = {};
+
+  // GIF and animated WebP loop from the https response. blob: cannot be seeked,
+  // so those formats play once. An APNG with num_plays 1 is patched below and
+  // shown from the patched bytes — the CDN file would stop after one run.
+  function repeatsFromNetwork(bytes) {
+    var type = sniffType(bytes);
+    return type === "image/gif" || type === "image/webp";
+  }
+
+  function crc32(bytes, start, end) {
+    var c = ~0;
+    for (var i = start; i < end; i++) {
+      c ^= bytes[i];
+      for (var k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+    }
+    return ~c >>> 0;
+  }
+
+  function u32be(bytes, at) {
+    return ((bytes[at] << 24) | (bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3]) >>> 0;
+  }
+
+  function apngPlaysAt(bytes) {
+    if (bytes.length < 8 || bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) return -1;
+    var at = 8;
+    for (var n = 0; n < 8 && at + 20 <= bytes.length; n++) {
+      var size = u32be(bytes, at);
+      var id = String.fromCharCode(bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]);
+      if (id === "acTL" && size === 8) return at + 12;
+      if (id === "IDAT" || id === "IEND") return -1;
+      if (size > bytes.length - at - 12) return -1;
+      at += 12 + size;
+    }
+    return -1;
+  }
+
+  function loopApng(bytes) {
+    var plays = apngPlaysAt(bytes);
+    if (plays < 0 || u32be(bytes, plays) === 0) return bytes;
+    var out = new Uint8Array(bytes);
+    out[plays] = out[plays + 1] = out[plays + 2] = out[plays + 3] = 0;
+    var crc = crc32(out, plays - 8, plays + 4);
+    out[plays + 4] = crc >>> 24;
+    out[plays + 5] = (crc >>> 16) & 255;
+    out[plays + 6] = (crc >>> 8) & 255;
+    out[plays + 7] = crc & 255;
+    return out;
+  }
+
   function bytesToDataUrl(bytes, mime) {
     var binary = "";
     for (var i = 0; i < bytes.length; i += 0x8000) {
@@ -352,7 +442,11 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
         if (!res.ok) throw new Error(String(res.status));
         return res.arrayBuffer();
       }).then(function (buffer) {
-        var blob = new Blob([buffer], { type: sniffType(new Uint8Array(buffer)) });
+        var shown = loopApng(new Uint8Array(buffer));
+        fileNet[url] = repeatsFromNetwork(shown);
+        fileAnim[url] = fileNet[url] || apngPlaysAt(shown) >= 0;
+        if (fileAnim[url] && !fileNet[url]) filePng[url] = shown;
+        var blob = new Blob([shown], { type: sniffType(shown) });
         fileBlobs[url] = blob;
         return blob;
       });
@@ -392,6 +486,15 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
     if (!held) use(url);
     else {
       holdFile(url).then(function (blob) {
+        var png = filePng[url];
+        if (png) {
+          use(bytesToDataUrl(png, "image/png"));
+          return;
+        }
+        if (fileNet[url]) {
+          use(url);
+          return;
+        }
         var local = URL.createObjectURL(blob);
         localUrls.push(local);
         use(local);
@@ -402,11 +505,13 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
     return frame;
   }
 
-  // ponytail: drag ghost is one decoded frame. The board receives the same file bytes.
-  function listedImage(img) {
+  // Still stickers: one decoded frame for the ghost. Animated ones keep the
+  // network URL; drawing them here freezes the list image in Safari.
+  function listedImage(img, still) {
     var width = img && img.naturalWidth;
     var height = img && img.naturalHeight;
     if (!width || !height) return null;
+    if (!still) return { width: width, height: height, src: "" };
     var scale = 180 / Math.max(width, height);
     var canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(width * scale));
@@ -425,9 +530,9 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
   function thumbs(pack, className) {
     var row = document.createElement("div");
     row.className = "thumbs";
-    var n = Math.min(6, pack.stickers.length);
+    var n = Math.min(4, pack.stickers.length);
     for (var i = 0; i < n; i++) {
-      row.appendChild(makeImg(pack.stickers[i].url, className, ""));
+      row.appendChild(makeImg(pack.stickers[i].url, className, "", true));
     }
     return row;
   }
@@ -436,7 +541,7 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
     var button = document.createElement("button");
     button.type = "button";
     button.className = "pack";
-    button.appendChild(makeImg(pack.coverUrl, "cover", pack.title));
+    button.appendChild(makeImg(pack.coverUrl, "cover", pack.title, true));
     var copy = document.createElement("div");
     copy.className = "pack-copy";
     var title = document.createElement("p");
@@ -445,6 +550,7 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
     var author = document.createElement("p");
     author.className = "pack-author";
     author.textContent = pack.author;
+    bindAuthor(author, pack.author);
     copy.appendChild(title);
     copy.appendChild(author);
     copy.appendChild(thumbs(pack, "thumb"));
@@ -499,11 +605,13 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
         section("Your list");
         for (var i = 0; i < library.length; i++) main.appendChild(packCard(library[i], true, []));
       }
-      if (trending.length) {
+      var fresh = [];
+      for (var t = 0; t < trending.length; t++) {
+        if (!ids[trending[t].id]) fresh.push(trending[t]);
+      }
+      if (fresh.length) {
         section("Trending");
-        for (var t = 0; t < trending.length; t++) {
-          main.appendChild(packCard(trending[t], !!ids[trending[t].id], trending));
-        }
+        for (var u = 0; u < fresh.length; u++) main.appendChild(packCard(fresh[u], false, fresh));
       }
       return;
     }
@@ -571,27 +679,16 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
         if (!pressing || !dragging) return;
         if (!previewSent) {
           previewSent = true;
-          var shot = listedImage(cell.querySelector("img"));
+          var shot = listedImage(cell.querySelector("img"), !fileAnim[url]);
           var message = { type: "preview", url: url, pack: openPack, x: hoverX, y: hoverY };
           if (shot) {
             message.width = shot.width;
             message.height = shot.height;
+            if (shot.src) message.src = shot.src;
           }
-          var blob = fileBlobs[url];
-          if (blob && (blob.type === "image/gif" || blob.type === "image/webp")) {
-            blob.arrayBuffer().then(function (buffer) {
-              var gifSrc = bytesToDataUrl(new Uint8Array(buffer), blob.type);
-              if (gifSrc.length <= 2000000) message.src = gifSrc;
-              else if (shot && shot.src) message.src = shot.src;
-              api.postMessage(message);
-            }, function () {
-              if (shot && shot.src) message.src = shot.src;
-              api.postMessage(message);
-            });
-          } else {
-            if (shot && shot.src) message.src = shot.src;
-            api.postMessage(message);
-          }
+          var png = filePng[url];
+          if (png && png.length <= 1400000) message.src = bytesToDataUrl(png, "image/png");
+          api.postMessage(message);
         } else {
           api.postMessage({ type: "preview-move", x: hoverX, y: hoverY });
         }
@@ -658,11 +755,31 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
   function renderModal() {
     if (!openPack) return;
     releaseHeld();
-    document.getElementById("modal-cover").src = openPack.coverUrl;
-    document.getElementById("modal-cover").alt = openPack.title;
+    var cover = document.getElementById("modal-cover");
+    var coverUrl = openPack.coverUrl;
+    cover.alt = openPack.title;
+    cover.removeAttribute("src");
+    holdFile(coverUrl).then(function () {
+      if (!openPack || openPack.coverUrl !== coverUrl) return;
+      var png = filePng[coverUrl];
+      cover.src = png ? bytesToDataUrl(png, "image/png") : coverUrl;
+    }, function () {
+      if (openPack && openPack.coverUrl === coverUrl) cover.src = coverUrl;
+    });
     document.getElementById("modal-title").textContent = openPack.title;
     var count = openPack.stickers.length === 1 ? "1 sticker" : openPack.stickers.length + " stickers";
-    document.getElementById("modal-author").textContent = openPack.author ? openPack.author + " · " + count : count;
+    var authorLine = document.getElementById("modal-author");
+    authorLine.textContent = "";
+    if (openPack.author) {
+      var name = document.createElement("span");
+      name.className = "author-link";
+      name.textContent = openPack.author;
+      bindAuthor(name, openPack.author);
+      authorLine.appendChild(name);
+      authorLine.appendChild(document.createTextNode(" · " + count));
+    } else {
+      authorLine.textContent = count;
+    }
     paintSave();
     var grid = document.getElementById("sticker-grid");
     grid.innerHTML = "";
@@ -690,13 +807,14 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
       var card = document.createElement("button");
       card.type = "button";
       card.className = "discover-card";
-      card.appendChild(makeImg(pack.coverUrl, "cover", pack.title));
+      card.appendChild(makeImg(pack.coverUrl, "cover", pack.title, true));
       var title = document.createElement("p");
       title.className = "pack-title";
       title.textContent = pack.title;
       var author = document.createElement("p");
       author.className = "pack-author";
       author.textContent = pack.author;
+      bindAuthor(author, pack.author);
       card.appendChild(title);
       card.appendChild(author);
       card.appendChild(thumbs(pack, "thumb"));
@@ -736,6 +854,27 @@ button.ghost:active { background: var(--dd-interaction-pressed, transparent); }
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape" && !modal.hidden) closeModal();
   });
+
+  function searchAuthor(name) {
+    var author = (name || "").trim();
+    if (!author) return;
+    closeModal();
+    clearTimeout(timer);
+    search.value = author;
+    activeRequest = ++requestSeq;
+    setStatus("Searching…", true);
+    api.postMessage({ type: "search", requestId: activeRequest, keyword: author, author: author });
+  }
+
+  function bindAuthor(node, name) {
+    if (!name) return;
+    if (node.classList.contains("pack-author")) node.classList.add("is-link");
+    node.addEventListener("click", function (event) {
+      event.stopPropagation();
+      event.preventDefault();
+      searchAuthor(name);
+    });
+  }
 
   search.addEventListener("input", function () {
     clearTimeout(timer);

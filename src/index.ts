@@ -6,12 +6,14 @@ import type {
 } from "@drawdy/driver-protocol";
 import type { DomElementSchema } from "@drawdy/driver-protocol";
 import {
+    fetchAuthor,
     fetchPack,
     fetchSearch,
     fetchTrending,
     fittedSize,
     imageMime,
     isAnimatedImage,
+    loopApng,
     packFromDetail,
     packsFromSearch,
     packsFromStorage,
@@ -285,6 +287,11 @@ async function renderGhost(gen: number, url: string, src: string, x: number, y: 
     ghost = { previewId, elementId, url, width: box.width, height: box.height };
 }
 
+/**
+ * DOM image, same path Drawdy uses for a pasted GIF, so the browser keeps the frames.
+ * GIFs stay on https — a data URL plays once because the decoder cannot seek it.
+ * APNGs pass a data URL of bytes whose play count was set to forever.
+ */
 function dataUrl(bytes: Uint8Array): string {
     let binary = "";
     for (let i = 0; i < bytes.length; i += 0x8000) {
@@ -293,7 +300,6 @@ function dataUrl(bytes: Uint8Array): string {
     return `data:${imageMime(bytes)};base64,${btoa(binary)}`;
 }
 
-/** DOM image, same path Drawdy uses for a pasted GIF, so the browser keeps the frames. */
 function animatedSchema(url: string, width: number, height: number): DomElementSchema {
     return {
         type: "box",
@@ -327,8 +333,11 @@ async function placeSticker(
             return;
         }
     }
-    const blob = new Blob([raw], { type: imageMime(raw) });
-    const animated = isAnimatedImage(raw);
+    const shown = loopApng(raw);
+    const mime = imageMime(shown);
+    const blob = new Blob([shown], { type: mime });
+    const animated = isAnimatedImage(shown);
+    const src = animated && mime === "image/png" ? dataUrl(shown) : url;
 
     const info = await current.issueCommand({
         type: "command:camera:get-info",
@@ -390,7 +399,7 @@ async function placeSticker(
                           y,
                           width,
                           height,
-                          schema: animatedSchema(dataUrl(raw), width, height),
+                          schema: animatedSchema(src, width, height),
                       }
                     : {
                           type: "image",
@@ -450,7 +459,9 @@ async function handleWebviewMessage(message: FromWebview): Promise<void> {
         }
         case "search": {
             try {
-                const packs = packsFromSearch(await fetchSearch(message.keyword));
+                const packs = packsFromSearch(
+                    await (message.author ? fetchAuthor(message.author) : fetchSearch(message.keyword)),
+                );
                 post({
                     type: "results",
                     requestId: message.requestId,

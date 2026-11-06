@@ -18,6 +18,10 @@ export function searchApiUrl(keyword: string): string {
     return SEARCH_API + encodeURIComponent(keyword.trim().slice(0, 200));
 }
 
+export function authorApiUrl(author: string): string {
+    return "https://api.sigstick.com/v1/stickerPack?author=" + encodeURIComponent(author.trim().slice(0, 200));
+}
+
 export function packApiUrl(id: string): string {
     return PACK_API + encodeURIComponent(id);
 }
@@ -206,6 +210,9 @@ export const fetchTrending = (): Promise<unknown> => fetchJson(TRENDING_API, "tr
 export const fetchSearch = (keyword: string): Promise<unknown> =>
     fetchJson(searchApiUrl(keyword), "search");
 
+export const fetchAuthor = (author: string): Promise<unknown> =>
+    fetchJson(authorApiUrl(author), "author");
+
 export const fetchPack = (id: string): Promise<unknown> => fetchJson(packApiUrl(id), "pack");
 
 const FOUR = (bytes: Uint8Array, at: number) =>
@@ -254,6 +261,47 @@ export function isAnimatedImage(bytes: Uint8Array): boolean {
     return false;
 }
 
+const crc32 = (bytes: Uint8Array, start: number, end: number) => {
+    let c = ~0;
+    for (let i = start; i < end; i++) {
+        c ^= bytes[i]!;
+        for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+    }
+    return ~c >>> 0;
+};
+
+/** Offset of an APNG `num_plays` field, or -1. A count of 0 means loop forever. */
+const apngPlaysAt = (bytes: Uint8Array): number => {
+    if (bytes.length < 8 || bytes[0] !== 0x89 || FOUR(bytes, 1) !== "PNG\r") return -1;
+    let at = 8;
+    for (let n = 0; n < 8 && at + 20 <= bytes.length; n++) {
+        const size = u32be(bytes, at);
+        const id = FOUR(bytes, at + 4);
+        if (id === "acTL" && size === 8) return at + 12;
+        if (id === "IDAT" || id === "IEND") return -1;
+        if (size > bytes.length - at - 12) return -1;
+        at += 12 + size;
+    }
+    return -1;
+};
+
+/**
+ * SigStick APNGs set `num_plays` to 1, so the browser stops after one run.
+ * 0 means forever. The chunk CRC covers the type and those eight data bytes.
+ */
+export function loopApng(bytes: Uint8Array): Uint8Array {
+    const plays = apngPlaysAt(bytes);
+    if (plays < 0 || u32be(bytes, plays) === 0) return bytes;
+    const out = new Uint8Array(bytes);
+    out[plays] = out[plays + 1] = out[plays + 2] = out[plays + 3] = 0;
+    const crc = crc32(out, plays - 8, plays + 4);
+    out[plays + 4] = crc >>> 24;
+    out[plays + 5] = (crc >>> 16) & 0xff;
+    out[plays + 6] = (crc >>> 8) & 0xff;
+    out[plays + 7] = crc & 0xff;
+    return out;
+}
+
 export function imageMime(bytes: Uint8Array): string {
     if (bytes.length >= 6 && FOUR(bytes, 0) === "GIF8") return "image/gif";
     if (bytes.length >= 8 && bytes[0] === 0x89 && FOUR(bytes, 1) === "PNG\r") return "image/png";
@@ -291,7 +339,7 @@ export function fittedSize(
 
 export type FromWebview =
     | { type: "ready" }
-    | { type: "search"; requestId: number; keyword: string }
+    | { type: "search"; requestId: number; keyword: string; author?: string }
     | { type: "open"; id: string }
     | { type: "add"; url: string; pack: PackView; x?: number; y?: number; bytes?: Uint8Array }
     | {
@@ -336,11 +384,10 @@ export function parseFromWebview(message: unknown): FromWebview | null {
         if (typeof body.requestId !== "number" || typeof body.keyword !== "string") {
             return null;
         }
-        return {
-            type: "search",
-            requestId: body.requestId,
-            keyword: body.keyword.trim().slice(0, 200),
-        };
+        const author = typeof body.author === "string" ? body.author.trim().slice(0, 200) : "";
+        return author
+            ? { type: "search", requestId: body.requestId, keyword: author, author }
+            : { type: "search", requestId: body.requestId, keyword: body.keyword.trim().slice(0, 200) };
     }
     if (body.type === "save") {
         const pack = asPack(body.pack);
